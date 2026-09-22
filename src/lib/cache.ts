@@ -43,7 +43,15 @@ class InMemoryCache {
     return entry.value as T;
   }
 
+  private static readonly MAX_ENTRIES = 2000;
+
   public set<T>(key: string, value: T, ttlSeconds = 60): void {
+    // Evita vazamento de memória com evicção quando atinge capacidade máxima
+    if (this.store.size >= InMemoryCache.MAX_ENTRIES && !this.store.has(key)) {
+      const oldestKey = this.store.keys().next().value;
+      if (oldestKey) this.store.delete(oldestKey);
+    }
+
     this.store.set(key, {
       value,
       expiresAt: Date.now() + ttlSeconds * 1000,

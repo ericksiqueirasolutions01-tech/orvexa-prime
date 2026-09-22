@@ -74,6 +74,10 @@ export function checkRateLimit(
 
   let bucket = memoryStore.get(key);
   if (!bucket) {
+    if (memoryStore.size >= 10000) {
+      const oldestKey = memoryStore.keys().next().value;
+      if (oldestKey) memoryStore.delete(oldestKey);
+    }
     bucket = { timestamps: [] };
     memoryStore.set(key, bucket);
   }

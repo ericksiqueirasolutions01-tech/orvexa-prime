@@ -91,7 +91,7 @@ export interface DiagnosticReport {
 }
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "orvexa-prime-secret-key-production-ready-2026-very-secure"
+  process.env.JWT_SECRET || "orvexa_prime_super_secret_jwt_key_2026_production_grade_token_guard"
 );
 
 /**
