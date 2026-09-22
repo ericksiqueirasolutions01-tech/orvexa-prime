@@ -552,3 +552,8 @@ export async function getUserConsumptionHistory(
   return history.reverse();
 }
 
+/**
+ * Alias conveniente para cálculo do resumo de consumo
+ */
+export const calculateUserConsumption = getUserConsumption;
+

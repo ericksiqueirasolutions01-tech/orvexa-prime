@@ -23,7 +23,10 @@ function applySecurityHeaders(res: NextResponse): NextResponse {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const token = req.cookies.get("orvexa_auth_token")?.value;
+  let token = req.cookies.get("orvexa_auth_token")?.value;
+  if (!token && req.headers.get("authorization")?.startsWith("Bearer ")) {
+    token = req.headers.get("authorization")?.slice(7).trim();
+  }
   const clientIp =
     req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
     req.headers.get("x-real-ip") ||

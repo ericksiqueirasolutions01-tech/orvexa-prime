@@ -50,20 +50,22 @@ export async function POST(req: Request) {
 
     const hashedPassword = await hashPassword(password);
 
-    // Cria o usuário com status PENDING_PAYMENT
-    // Regra estrita: Nunca liberar como ACTIVE sem pagamento confirmado!
+    const isFreePlan = !selectedPlan || selectedPlan.slug?.toLowerCase() === "free" || selectedPlan.priceCents === 0;
+    const initialUserStatus = isFreePlan ? "ACTIVE" : "PENDING_PAYMENT";
+
+    // Cria o usuário com status ACTIVE para plano gratuito ou PENDING_PAYMENT para planos pagos
     const newUser = await prisma.user.create({
       data: {
         name: name.trim(),
         email: normalizedEmail,
         passwordHash: hashedPassword,
         role: "USER",
-        status: "PENDING_PAYMENT",
+        status: initialUserStatus,
         planId: selectedPlan?.id || null,
       },
     });
 
-    // Cria registro de assinatura inicial pendente
+    // Cria registro de assinatura inicial
     if (selectedPlan) {
       const futureDate = new Date();
       futureDate.setMonth(futureDate.getMonth() + 1);
@@ -72,23 +74,25 @@ export async function POST(req: Request) {
         data: {
           userId: newUser.id,
           planId: selectedPlan.id,
-          status: "TRIALING",
+          status: isFreePlan ? "ACTIVE" : "TRIALING",
           currentPeriodStart: new Date(),
           currentPeriodEnd: futureDate,
-          gatewayProvider: "STRIPE",
+          gatewayProvider: isFreePlan ? "INTERNAL" : "STRIPE",
         },
       });
 
-      await prisma.payment.create({
-        data: {
-          userId: newUser.id,
-          subscriptionId: sub.id,
-          amountCents: selectedPlan.priceCents,
-          currency: "BRL",
-          status: "PENDING",
-          gateway: "STRIPE",
-        },
-      });
+      if (!isFreePlan) {
+        await prisma.payment.create({
+          data: {
+            userId: newUser.id,
+            subscriptionId: sub.id,
+            amountCents: selectedPlan.priceCents,
+            currency: "BRL",
+            status: "PENDING",
+            gateway: "STRIPE",
+          },
+        });
+      }
     }
 
     // Registra auditoria
@@ -98,7 +102,7 @@ export async function POST(req: Request) {
         action: "USER_REGISTERED",
         resourceType: "USER",
         resourceId: newUser.id,
-        details: JSON.stringify({ email: newUser.email, plan: selectedPlan?.name }),
+        details: JSON.stringify({ email: newUser.email, plan: selectedPlan?.name, isFree: isFreePlan }),
       },
     });
 
@@ -107,7 +111,7 @@ export async function POST(req: Request) {
       name: newUser.name,
       email: newUser.email,
       role: "USER",
-      status: "PENDING_PAYMENT",
+      status: initialUserStatus,
       planId: newUser.planId,
     });
 
@@ -119,9 +123,11 @@ export async function POST(req: Request) {
         email: newUser.email,
         role: newUser.role,
         status: newUser.status,
-        plan: selectedPlan?.name || "START",
+        plan: selectedPlan?.name || "FREE",
       },
-      message: "Cadastro realizado com sucesso! Prossiga para a confirmação de assinatura.",
+      message: isFreePlan
+        ? "Cadastro realizado com sucesso! Sua conta FREE está ativa."
+        : "Cadastro realizado com sucesso! Prossiga para a confirmação de assinatura.",
     });
 
     response.cookies.set(AUTH_COOKIE_NAME, token, {

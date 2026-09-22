@@ -2,13 +2,14 @@
 // MOTOR PROFISSIONAL DE ARQUIVOS & OCR — ORVEXA PRIME DIGITAL
 
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 
 export interface FileAnalysisResult {
   fileName: string;
   fileType: string;
   fileSizeBytes: number;
   extractedText: string;
-  format: "PDF" | "DOCX" | "XLSX" | "CSV" | "PPTX" | "TXT" | "JSON" | "IMAGE" | "UNKNOWN";
+  format: "PDF" | "DOCX" | "XLSX" | "CSV" | "PPTX" | "TXT" | "JSON" | "IMAGE" | "ZIP" | "UNKNOWN";
   previewData?: any;
   metrics?: {
     totalRows?: number;
@@ -239,6 +240,62 @@ export async function extractTextFromFileBuffer(
         charCount: imageBase64?.length || 0,
       },
     };
+  }
+
+  // 7. Arquivos Compactados (ZIP) — Inspeção de Estrutura e Prévia de Código/Texto
+  if (lowerName.endsWith(".zip") || mimeType?.includes("zip") || mimeType?.includes("compressed")) {
+    try {
+      const zip = await JSZip.loadAsync(buffer);
+      const entries = Object.keys(zip.files);
+      const fileList: string[] = [];
+      let sampleText = "";
+
+      for (const entry of entries) {
+        const item = zip.files[entry];
+        if (item.dir) {
+          fileList.push(`📁 ${entry}`);
+        } else {
+          fileList.push(`📄 ${entry}`);
+          const lower = entry.toLowerCase();
+          if (
+            (lower.endsWith(".md") ||
+              lower.endsWith(".txt") ||
+              lower.endsWith(".json") ||
+              lower.endsWith(".ts") ||
+              lower.endsWith(".js") ||
+              lower.endsWith(".py") ||
+              lower.endsWith(".csv")) &&
+            sampleText.length < 15000
+          ) {
+            try {
+              const textContent = await item.async("string");
+              sampleText += `\n\n--- [Arquivo no ZIP: ${entry}] ---\n${textContent.slice(0, 2500)}`;
+            } catch {}
+          }
+        }
+      }
+
+      const extracted = `[Arquivo ZIP: "${fileName}" com ${entries.length} itens indexados]\nEstrutura de Arquivos:\n${fileList.slice(0, 40).join("\n")}${sampleText}`;
+
+      return {
+        fileName,
+        fileType: mimeType || "application/zip",
+        fileSizeBytes: size,
+        extractedText: extracted,
+        format: "ZIP",
+        previewData: {
+          type: "ZIP",
+          totalEntries: entries.length,
+          files: fileList.slice(0, 60),
+        },
+        metrics: {
+          charCount: extracted.length,
+          wordCount: extracted.split(/\s+/).filter(Boolean).length,
+        },
+      };
+    } catch (zipErr: any) {
+      console.warn("[File Engine] Erro ao extrair ZIP:", zipErr.message);
+    }
   }
 
   // Fallback Genérico

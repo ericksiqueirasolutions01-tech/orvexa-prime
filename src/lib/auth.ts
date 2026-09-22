@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { prisma } from "./prisma";
 
 const JWT_SECRET = new TextEncoder().encode(
@@ -45,12 +45,22 @@ export async function verifyAuthToken(token: string): Promise<UserSession | null
 }
 
 /**
- * Retrieves the current authenticated user session from HTTP-Only cookie.
+ * Retrieves the current authenticated user session from HTTP-Only cookie or Authorization Bearer header.
  * Performs real-time status validation from database to prevent stale access.
  */
 export async function getCurrentUser(): Promise<UserSession | null> {
   const cookieStore = cookies();
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+  let token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+
+  if (!token) {
+    try {
+      const headerStore = headers();
+      const authHeader = headerStore.get("authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.substring(7).trim();
+      }
+    } catch {}
+  }
 
   if (!token) return null;
 
