@@ -1,0 +1,54 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-09-22T18:18:40.620Z",
+  "retentionLimit": 15,
+  "backups": [
+    {
+      "id": "bkp_1790101120060_75e7fa",
+      "type": "FULL",
+      "fileName": "orvexa_backup_full_2026-09-22T18-18-40-060Z_75e7fa.zip",
+      "filePath": "C:\\Users\\User\\.gemini\\antigravity\\scratch\\orvexa-prime\\storage\\backups\\orvexa_backup_full_2026-09-22T18-18-40-060Z_75e7fa.zip",
+      "fileSizeBytes": 55868,
+      "fileSizeFormatted": "54.6 KB",
+      "checksumSha256": "c5d971ce0dcda4e2c961622318ec162a7bea9e0505c4a7684804a9d6253af66e",
+      "status": "RESTORED",
+      "isAutomatic": false,
+      "counts": {
+        "users": 6,
+        "plans": 7,
+        "conversations": 17,
+        "messages": 27,
+        "files": 0,
+        "memories": 0,
+        "payments": 3,
+        "auditLogs": 29
+      },
+      "durationMs": 52,
+      "createdAt": "2026-09-22T18:18:40.060Z",
+      "restoredAt": "2026-09-22T18:18:40.620Z"
+    },
+    {
+      "id": "bkp_1790101119890_08cfad",
+      "type": "DATABASE",
+      "fileName": "orvexa_backup_database_2026-09-22T18-18-39-892Z_08cfad.zip",
+      "filePath": "C:\\Users\\User\\.gemini\\antigravity\\scratch\\orvexa-prime\\storage\\backups\\orvexa_backup_database_2026-09-22T18-18-39-892Z_08cfad.zip",
+      "fileSizeBytes": 55214,
+      "fileSizeFormatted": "53.9 KB",
+      "checksumSha256": "2117854987c698dd9879968bab4b95d65a086a061aec64788fb355a54c4ea1c6",
+      "status": "SUCCESS",
+      "isAutomatic": false,
+      "counts": {
+        "users": 6,
+        "plans": 7,
+        "conversations": 17,
+        "messages": 27,
+        "files": 0,
+        "memories": 0,
+        "payments": 3,
+        "auditLogs": 28
+      },
+      "durationMs": 147,
+      "createdAt": "2026-09-22T18:18:39.890Z"
+    }
+  ]
+}

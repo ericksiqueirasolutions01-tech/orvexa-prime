@@ -17,6 +17,7 @@ import {
   Sliders,
   Bot,
   Activity,
+  Database,
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -46,6 +47,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "Controle de Consumo", href: "/admin/usage", icon: BarChart3 },
     { label: "Auditoria & Logs", href: "/admin/audit", icon: ShieldAlert },
     { label: "Sistema & Diagnóstico", href: "/admin/system/diagnostics", icon: Activity },
+    { label: "Backup & Restauração", href: "/admin/backup", icon: Database },
     { label: "ORVEXA PRIME Engine", href: "/admin/router", icon: GitFork },
   ];
 
