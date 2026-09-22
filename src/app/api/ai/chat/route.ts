@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { executeAiGatewayStream, ChatMessageInput } from "@/lib/ai-gateway";
 import { buildAgentMemoryContextPrompt, extractAndSaveAgentFacts } from "@/ai/agents/agent-memory";
 import { dispatchAutonomousAgentTool } from "@/ai/agents/tool-dispatcher";
+import { retrieveUnifiedMemoryContext } from "@/ai/memory/semantic-search";
+import { extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
+import { indexConversation } from "@/ai/memory/conversation-indexer";
 
 export async function POST(req: Request) {
   try {
@@ -199,7 +202,29 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
       });
     }
 
-    // 4. Executa chamada no AI Gateway com failover e balanceamento
+    // 4. Recuperação Semântica Unificada (RAG Inteligente)
+    if (lastUserMessage) {
+      const memoryContext = await retrieveUnifiedMemoryContext({
+        userId: session.id,
+        query: lastUserMessage.content,
+        conversationId: activeConvId,
+        limit: 5,
+      });
+
+      if (memoryContext) {
+        systemPrompt = (systemPrompt || "") + memoryContext;
+      }
+
+      // Aprende novos fatos do usuário em background
+      extractAndSaveFactsFromConversation(session.id, lastUserMessage.content).catch(() => {});
+
+      // Indexa a conversa em background para manter a memória atualizada
+      if (activeConvId) {
+        indexConversation(activeConvId).catch(() => {});
+      }
+    }
+
+    // 5. Executa chamada no AI Gateway com failover e balanceamento
     const gatewayResult = await executeAiGatewayStream({
       userId: session.id,
       userRole: session.role,

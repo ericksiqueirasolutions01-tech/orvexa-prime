@@ -18,6 +18,7 @@ import {
   Bot,
   FolderGit2,
   Code2,
+  Brain,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -53,6 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { label: "Chat Multi-IA", href: "/dashboard/chat", icon: MessageSquare },
     { label: "ORVEXA Workspace", href: "/dashboard/workspace", icon: FolderGit2 },
     { label: "ORVEXA Codex (Dev)", href: "/dashboard/codex", icon: Code2 },
+    { label: "Memória Inteligente", href: "/dashboard/memory", icon: Brain },
     { label: "Site Builder", href: "/dashboard/site-builder", icon: Globe },
     { label: "Agentes Especialistas", href: "/dashboard/agents", icon: Bot },
     { label: "Image Studio", href: "/dashboard/image-studio", icon: ImageIcon },

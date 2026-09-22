@@ -1,18 +1,27 @@
 // src/ai/memory/user-memory.ts
 // MEMÓRIA INTELIGENTE & CONTEXTO PERMANENTE — ORVEXA PRIME DIGITAL
+// Gestão de fatos, preferências, projetos e conhecimentos do usuário com embeddings
 
 import { prisma } from "@/lib/prisma";
+import {
+  generateDenseEmbedding,
+  serializeEmbedding,
+  deserializeEmbedding,
+  cosineSimilarity,
+  calculateHybridScore,
+} from "./vector-store";
 
 export interface MemoryEntry {
+  id?: string;
   key: string;
   value: string;
-  category?: "GENERAL" | "PREFERENCE" | "FACT" | "PROJECT" | "CODING" | "PEDAGOGICAL";
+  category?: "GENERAL" | "PREFERENCE" | "FACT" | "PROJECT" | "CODING" | "PEDAGOGICAL" | "BUSINESS";
   tags?: string[];
   importance?: number;
 }
 
 /**
- * Salva ou atualiza uma memória para o usuário
+ * Salva ou atualiza uma memória para o usuário, gerando vetor semântico
  */
 export async function saveUserMemory(userId: string, entry: MemoryEntry) {
   const existing = await prisma.userMemory.findFirst({
@@ -22,6 +31,10 @@ export async function saveUserMemory(userId: string, entry: MemoryEntry) {
     },
   });
 
+  const fullText = `${entry.key}: ${entry.value} ${(entry.tags || []).join(" ")} ${entry.category || ""}`;
+  const embedding = generateDenseEmbedding(fullText);
+  const serialized = serializeEmbedding(embedding);
+
   if (existing) {
     return prisma.userMemory.update({
       where: { id: existing.id },
@@ -30,6 +43,7 @@ export async function saveUserMemory(userId: string, entry: MemoryEntry) {
         category: entry.category || existing.category,
         tags: entry.tags ? JSON.stringify(entry.tags) : existing.tags,
         importance: entry.importance ?? existing.importance,
+        embedding: serialized,
       },
     });
   }
@@ -42,6 +56,45 @@ export async function saveUserMemory(userId: string, entry: MemoryEntry) {
       category: entry.category || "GENERAL",
       tags: JSON.stringify(entry.tags || []),
       importance: entry.importance ?? 3,
+      embedding: serialized,
+    },
+  });
+}
+
+/**
+ * Edita uma memória existente por ID
+ */
+export async function updateUserMemory(
+  userId: string,
+  memoryId: string,
+  updates: Partial<MemoryEntry>
+) {
+  const existing = await prisma.userMemory.findFirst({
+    where: { id: memoryId, userId },
+  });
+
+  if (!existing) {
+    throw new Error("Memória não encontrada ou permissão negada.");
+  }
+
+  const updatedKey = updates.key || existing.key;
+  const updatedValue = updates.value || existing.value;
+  const updatedTags = updates.tags ? JSON.stringify(updates.tags) : existing.tags;
+  const updatedCategory = updates.category || existing.category;
+  const updatedImportance = updates.importance ?? existing.importance;
+
+  const fullText = `${updatedKey}: ${updatedValue} ${updatedTags} ${updatedCategory}`;
+  const embedding = generateDenseEmbedding(fullText);
+
+  return prisma.userMemory.update({
+    where: { id: memoryId },
+    data: {
+      key: updatedKey,
+      value: updatedValue,
+      tags: updatedTags,
+      category: updatedCategory,
+      importance: updatedImportance,
+      embedding: serializeEmbedding(embedding),
     },
   });
 }
@@ -53,7 +106,7 @@ export async function getUserMemories(userId: string, category?: string) {
   return prisma.userMemory.findMany({
     where: {
       userId,
-      category: category || undefined,
+      category: category && category !== "ALL" ? category : undefined,
     },
     orderBy: [{ importance: "desc" }, { updatedAt: "desc" }],
   });
@@ -71,67 +124,95 @@ export async function buildMemoryContextPrompt(userId: string): Promise<string> 
 }
 
 /**
- * Busca semântica nas memórias do usuário (compatível com SQLite e preparado para PostgreSQL + pgvector)
+ * Busca semântica vetorial híbrida nas memórias do usuário
  */
-export async function searchUserMemorySemantically(userId: string, query: string, limit: number = 5) {
+export async function searchUserMemorySemantically(
+  userId: string,
+  query: string,
+  limit = 5
+) {
   const allMemories = await getUserMemories(userId);
   if (allMemories.length === 0) return [];
 
-  const queryTokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+  const queryVector = generateDenseEmbedding(query);
 
-  // Classificação por relevância de tokens e tags
   const scored = allMemories.map((m) => {
-    const text = `${m.key} ${m.value} ${m.tags} ${m.category}`.toLowerCase();
-    let score = 0;
-    for (const token of queryTokens) {
-      if (text.includes(token)) {
-        score += 10;
-      }
+    let vectorSim = 0;
+    const itemVector = deserializeEmbedding(m.embedding);
+
+    if (itemVector) {
+      vectorSim = cosineSimilarity(queryVector, itemVector);
+    } else {
+      // Fallback: gera na hora se não tiver salvo
+      const generated = generateDenseEmbedding(`${m.key}: ${m.value}`);
+      vectorSim = cosineSimilarity(queryVector, generated);
     }
-    score += m.importance;
-    return { memory: m, score };
+
+    const hybridScore = calculateHybridScore({
+      vectorSimilarity: vectorSim,
+      query,
+      targetText: `${m.key} ${m.value} ${m.tags}`,
+      importance: m.importance,
+    });
+
+    return {
+      memory: m,
+      similarityScore: +(hybridScore * 100).toFixed(1),
+    };
   });
 
-  scored.sort((a, b) => b.score - a.score);
-  return scored.filter((item) => item.score > 3).slice(0, limit).map((item) => item.memory);
+  scored.sort((a, b) => b.similarityScore - a.similarityScore);
+  return scored.slice(0, limit);
 }
 
 /**
  * Extrai automaticamente fatos e preferências de mensagens do usuário para memória de longo prazo
  */
-export async function extractAndSaveFactsFromConversation(userId: string, userMessage: string) {
+export async function extractAndSaveFactsFromConversation(
+  userId: string,
+  userMessage: string
+) {
   const clean = userMessage.trim();
 
-  // Detecção de nome do usuário
-  const nameMatch = clean.match(/(?:meu nome é|me chamo|pode me chamar de)\s+([A-Za-zÀ-ÿ]+)/i);
+  // 1. Detecção de nome do usuário
+  const nameMatch = clean.match(
+    /(?:meu nome é|me chamo|pode me chamar de|sou o|sou a)\s+([A-Za-zÀ-ÿ]+)/i
+  );
   if (nameMatch && nameMatch[1]) {
     await saveUserMemory(userId, {
       key: "NOME_DO_USUARIO",
       value: nameMatch[1],
       category: "FACT",
       importance: 5,
+      tags: ["identidade", "perfil"],
     });
   }
 
-  // Detecção de stack ou linguagem de programação preferida
-  const stackMatch = clean.match(/(?:minha stack é|eu programo em|minha linguagem favorita é)\s+([A-Za-z0-9+#.\s]+)/i);
+  // 2. Detecção de stack ou linguagem de programação preferida
+  const stackMatch = clean.match(
+    /(?:minha stack é|eu programo em|minha linguagem favorita é|desenvolvo em|trabalho com)\s+([A-Za-z0-9+#.\s]+)/i
+  );
   if (stackMatch && stackMatch[1]) {
     await saveUserMemory(userId, {
       key: "STACK_PREFERIDA",
       value: stackMatch[1].trim(),
       category: "CODING",
       importance: 4,
+      tags: ["desenvolvimento", "tecnologia"],
     });
   }
 
-  // Detecção de empresa ou projeto ativo
-  const projectMatch = clean.match(/(?:estou criando|meu projeto é|minha empresa é|meu sistema se chama)\s+([A-Za-z0-9À-ÿ\s]+)/i);
+  // 3. Detecção de empresa ou projeto ativo
+  const projectMatch = clean.match(
+    /(?:estou criando|meu projeto é|minha empresa é|meu sistema se chama|estou desenvolvendo um)\s+([A-Za-z0-9À-ÿ\s]+)/i
+  );
   if (projectMatch && projectMatch[1]) {
     await saveUserMemory(userId, {
       key: "PROJETO_ATIVO",
       value: projectMatch[1].trim().slice(0, 100),
       category: "PROJECT",
       importance: 4,
+      tags: ["projeto", "negocio"],
     });
   }
 }
@@ -147,4 +228,3 @@ export async function deleteUserMemory(userId: string, memoryId: string) {
     },
   });
 }
-

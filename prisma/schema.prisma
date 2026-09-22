@@ -30,6 +30,8 @@ model User {
   projects        Project[]
   memories        UserMemory[]
   agentMemories   AgentMemory[]
+  conversationMemories ConversationMemory[]
+  fileKnowledge        FileKnowledge[]
 
   @@index([email])
   @@index([status])
@@ -201,6 +203,7 @@ model AgentMemory {
   category   String   @default("GENERAL") // STACK, PREFERENCE, FACT, RULE, CONTEXT
   tags       String   @default("[]") // JSON string of tags
   importance Int      @default(3) // 1 to 5
+  embedding  String?  // JSON float array vector embedding
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -226,6 +229,7 @@ model Conversation {
   agent           Agent?      @relation(fields: [agentId], references: [id])
   messages        Message[]
   files           File[]
+  memories        ConversationMemory[]
 
   @@index([userId])
   @@index([createdAt])
@@ -290,6 +294,7 @@ model File {
 
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  knowledgeChunks FileKnowledge[]
 
   @@index([userId])
   @@index([conversationId])
@@ -395,9 +400,10 @@ model UserMemory {
   userId     String
   key        String   // e.g. "preferred_language", "company_name", "tech_stack"
   value      String   // Memory content
-  category   String   @default("GENERAL") // PREFERENCE, FACT, PROJECT, CODING, PEDAGOGICAL
+  category   String   @default("GENERAL") // PREFERENCE, FACT, PROJECT, CODING, PEDAGOGICAL, BUSINESS
   tags       String   @default("[]") // JSON string of tags
   importance Int      @default(3) // 1 (low) to 5 (critical)
+  embedding  String?  // JSON float array vector embedding
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -406,6 +412,48 @@ model UserMemory {
   @@index([userId])
   @@index([category])
   @@index([key])
+}
+
+model ConversationMemory {
+  id             String       @id @default(uuid())
+  userId         String
+  conversationId String
+  title          String
+  summary        String       // Semantic summary of discussion / conclusions
+  keyTakeaways   String       @default("[]") // JSON array of bullet points
+  tags           String       @default("[]") // JSON array of tags
+  embedding      String?      // JSON float array vector embedding
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model FileKnowledge {
+  id             String    @id @default(uuid())
+  userId         String
+  fileId         String
+  fileName       String
+  chunkIndex     Int       @default(0)
+  content        String    // Text segment from document/spreadsheet/code
+  summary        String?   // Micro-summary of this chunk
+  category       String    @default("DOCUMENT")
+  embedding      String?   // JSON float array vector embedding
+  metadata       String?   // JSON string with page, sheet, line, mimeType
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  file           File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([fileId])
+  @@index([category])
 }
 
 
