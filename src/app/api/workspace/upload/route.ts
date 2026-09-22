@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { extractTextFromFileBuffer } from "@/ai/tools/files";
 import { categorizeFileName } from "@/ai/tools/file-generator";
+import { checkUserStorageQuota } from "@/lib/plan-limits";
 
 export const runtime = "nodejs";
 
@@ -37,27 +38,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nenhum arquivo válido foi enviado." }, { status: 400 });
     }
 
-    // 1. Verificação de Quota de Armazenamento do Usuário
-    const user = await prisma.user.findUnique({
-      where: { id: session.id },
-      include: { plan: true },
-    });
-
-    const quotaBytes = user?.plan?.storageQuotaBytes || 524288000; // 500 MB padrão
-    const storageAgg = await prisma.file.aggregate({
-      where: { userId: session.id },
-      _sum: { fileSizeBytes: true },
-    });
-    const currentUsedBytes = storageAgg._sum.fileSizeBytes || 0;
+    // 1. Verificação Centralizada de Quota de Armazenamento do Usuário
     const incomingBytes = files.reduce((acc, f) => acc + f.size, 0);
+    const storageCheck = await checkUserStorageQuota(session.id, incomingBytes);
 
-    if (currentUsedBytes + incomingBytes > quotaBytes && session.role !== "ADMIN") {
-      const quotaMb = (quotaBytes / (1024 * 1024)).toFixed(0);
-      const usedMb = (currentUsedBytes / (1024 * 1024)).toFixed(1);
+    if (!storageCheck.hasStorage && session.role !== "ADMIN") {
+      const quotaMb = (storageCheck.maxBytes / (1024 * 1024)).toFixed(0);
+      const usedMb = (storageCheck.usedBytes / (1024 * 1024)).toFixed(1);
       return NextResponse.json(
         {
           error: `Limite de armazenamento excedido (${usedMb} MB de ${quotaMb} MB). Libere espaço ou faça upgrade do seu plano.`,
           quotaExceeded: true,
+          storageStatus: storageCheck,
         },
         { status: 403 }
       );
@@ -104,9 +96,9 @@ export async function POST(req: NextRequest) {
       uploaded: createdFiles,
       count: createdFiles.length,
       storage: {
-        usedBytes: currentUsedBytes + incomingBytes,
-        quotaBytes,
-        percentage: Math.round(((currentUsedBytes + incomingBytes) / quotaBytes) * 100),
+        usedBytes: storageCheck.usedBytes + incomingBytes,
+        quotaBytes: storageCheck.maxBytes,
+        percentage: storageCheck.maxBytes > 0 ? Math.min(100, Math.round(((storageCheck.usedBytes + incomingBytes) / storageCheck.maxBytes) * 100)) : 0,
       },
     });
   } catch (error: any) {

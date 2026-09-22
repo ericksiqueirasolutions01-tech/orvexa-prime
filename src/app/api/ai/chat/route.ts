@@ -7,6 +7,7 @@ import { dispatchAutonomousAgentTool } from "@/ai/agents/tool-dispatcher";
 import { retrieveUnifiedMemoryContext } from "@/ai/memory/semantic-search";
 import { extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 import { indexConversation } from "@/ai/memory/conversation-indexer";
+import { checkUserTokenQuota, checkModelAccess } from "@/lib/plan-limits";
 
 export async function POST(req: Request) {
   try {
@@ -35,33 +36,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Nenhuma mensagem enviada." }, { status: 400 });
     }
 
-    // 1. Verificação de Quota de Tokens do Usuário (se não for ADMIN)
-    if (session.role !== "ADMIN") {
-      const user = await prisma.user.findUnique({
-        where: { id: session.id },
-        include: { plan: true },
-      });
-
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-
-      const usageAgg = await prisma.usageLog.aggregate({
-        where: {
-          userId: session.id,
-          createdAt: { gte: startOfMonth },
+    // 1. Verificação de Quota de Tokens do Usuário via serviço centralizado
+    const quotaStatus = await checkUserTokenQuota(session.id);
+    if (!quotaStatus.hasQuota) {
+      return NextResponse.json(
+        {
+          error: `Limite de tokens do seu plano (${quotaStatus.planName}) atingido neste ciclo (${quotaStatus.usedTokens.toLocaleString()} / ${quotaStatus.maxTokens.toLocaleString()}). Faça upgrade para continuar utilizando IA.`,
+          quotaExceeded: true,
+          quotaStatus,
         },
-        _sum: { totalTokens: true },
-      });
+        { status: 403 }
+      );
+    }
 
-      const used = usageAgg._sum.totalTokens || 0;
-      const quota = user?.plan?.monthlyTokens || 0;
-
-      if (quota > 0 && used >= quota) {
+    // 2. Verificação de Acesso ao Modelo solicitado
+    if (modelPreference && modelPreference !== "orvexa-prime") {
+      const modelAccess = await checkModelAccess(session.id, modelPreference);
+      if (!modelAccess.allowed) {
         return NextResponse.json(
           {
-            error: "Limite de tokens do seu plano atingido neste ciclo. Faça upgrade do seu plano.",
-            quotaExceeded: true,
+            error: `O modelo "${modelPreference}" não está disponível no plano ${modelAccess.planName}. Faça upgrade para acessar este modelo.`,
+            planUpgradeRequired: true,
           },
           { status: 403 }
         );

@@ -43,6 +43,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "Gestão Ilimitada de APIs", href: "/admin/api-keys", icon: Key },
     { label: "Gestão de Usuários", href: "/admin/users", icon: Users },
     { label: "Controle de Consumo", href: "/admin/usage", icon: BarChart3 },
+    { label: "Auditoria & Logs", href: "/admin/audit", icon: ShieldAlert },
     { label: "ORVEXA PRIME Engine", href: "/admin/router", icon: GitFork },
   ];
 

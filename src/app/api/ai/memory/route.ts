@@ -328,3 +328,4 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Falha ao excluir memória." }, { status: 500 });
   }
 }
+
