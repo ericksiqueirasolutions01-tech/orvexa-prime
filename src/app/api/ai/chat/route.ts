@@ -8,7 +8,7 @@ import { retrieveUnifiedMemoryContext } from "@/ai/memory/semantic-search";
 import { extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 import { indexConversation } from "@/ai/memory/conversation-indexer";
 import { checkUserTokenQuota, checkModelAccess } from "@/lib/plan-limits";
-import { assertCanSendMessage, assertCanUseAgent } from "@/lib/consumption";
+import { assertCanSendMessage, assertCanUseAgent, getUserConsumption, invalidateUserConsumptionCache } from "@/lib/consumption";
 
 export async function POST(req: Request) {
   try {
@@ -50,8 +50,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1.1 Verificação de Quota de Mensagens do Plano (FREE: 100, PRO: 1500, BUSINESS: 6000, ENTERPRISE: 50000)
-    const messageGuard = await assertCanSendMessage(session.id);
+    // 1.1 Verificação de Quota de Mensagens do Plano com cache L1
+    const consumptionSummary = await getUserConsumption(session.id);
+    const messageGuard = await assertCanSendMessage(session.id, consumptionSummary);
     if (!messageGuard.allowed) {
       return NextResponse.json(
         {
@@ -103,7 +104,7 @@ export async function POST(req: Request) {
           );
         }
 
-        // Validação de permissões por plano/role
+        // Validação de permissões por plano/role reutilizando consumptionSummary pré-carregado
         let allowedRoles: string[] = ["USER", "ADMIN"];
         let allowedPlans: string[] = ["ALL"];
         try {
@@ -113,18 +114,14 @@ export async function POST(req: Request) {
           allowedPlans = JSON.parse(agent.allowedPlans || "[\"ALL\"]");
         } catch {}
 
-        const userRecord = await prisma.user.findUnique({
-          where: { id: session.id },
-          include: { plan: true },
-        });
-        const planSlug = userRecord?.plan?.slug?.toUpperCase() || "FREE";
+        const planSlug = consumptionSummary.plan.slug.toUpperCase();
 
         const hasAccess =
           (allowedRoles.includes(session.role) &&
             (allowedPlans.includes("ALL") || allowedPlans.includes(planSlug))) ||
           session.role === "ADMIN";
 
-        const agentGuard = await assertCanUseAgent(session.id, agent.slug);
+        const agentGuard = await assertCanUseAgent(session.id, agent.slug, consumptionSummary);
         if (!agentGuard.allowed) {
           return NextResponse.json(
             {
@@ -221,6 +218,8 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
           tokensIn: Math.ceil(lastUserMessage.content.length / 4),
         },
       });
+      // Invalida cache de contagem de consumo do usuário em background
+      invalidateUserConsumptionCache(session.id);
     }
 
     // 4. Recuperação Semântica Unificada (RAG Inteligente)

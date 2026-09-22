@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { decryptApiKey } from "./crypto";
+import { appCache } from "./cache";
 import { buildMemoryContextPrompt, extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 
 export interface ChatMessageInput {
@@ -89,15 +90,21 @@ export async function resolveOrvexaPrimeRoute(
 ): Promise<RouterDecision> {
   const normalized = userPrompt.toLowerCase();
 
-  // 1. Busca regras configuradas no banco pelo Administrador
-  const rules = await prisma.routerRule.findMany({
-    where: { isActive: true },
-    include: {
-      targetProvider: true,
-      targetModel: true,
+  // 1. Busca regras configuradas no banco pelo Administrador (com cache L1 de 60s)
+  const rules = await appCache.getOrSet(
+    "router:active_rules",
+    async () => {
+      return prisma.routerRule.findMany({
+        where: { isActive: true },
+        include: {
+          targetProvider: true,
+          targetModel: true,
+        },
+        orderBy: { priority: "asc" },
+      });
     },
-    orderBy: { priority: "asc" },
-  });
+    60
+  );
 
   // Se tiver anexos de arquivos ou imagens
   if (hasFiles) {
@@ -178,98 +185,105 @@ export async function resolveOrvexaPrimeRoute(
  * e bloqueio absoluto a 100% conforme diretrizes do Prompt Mestre.
  */
 export async function getHealthyApiKeys(providerSlug: string, requiredCapability?: string) {
-  const now = new Date();
-  const provider = await prisma.aiProvider.findUnique({
-    where: { slug: providerSlug },
-    include: {
-      apiKeys: {
-        where: {
-          status: { not: "DISABLED" },
+  const cacheKey = `apikeys:${providerSlug}:${requiredCapability || "ALL"}`;
+  return appCache.getOrSet(
+    cacheKey,
+    async () => {
+      const now = new Date();
+      const provider = await prisma.aiProvider.findUnique({
+        where: { slug: providerSlug },
+        include: {
+          apiKeys: {
+            where: {
+              status: { not: "DISABLED" },
+            },
+          },
         },
-      },
+      });
+
+      if (!provider || provider.apiKeys.length === 0) {
+        return [];
+      }
+
+      const eligibleKeys: Array<any> = [];
+
+      for (const key of provider.apiKeys) {
+        // 1. Quarentena temporária por Rate Limit (429)
+        if (key.quarantinedUntil && key.quarantinedUntil > now) {
+          continue;
+        }
+
+        // 2. Validação estrita de Capacidades
+        // "Nunca enviar uma solicitação para um modelo sem capacidade compatível"
+        if (requiredCapability && requiredCapability !== "TEXTO") {
+          try {
+            const caps: string[] = JSON.parse(key.capabilities || "[]");
+            if (caps.length > 0 && !caps.includes(requiredCapability)) {
+              continue; // Pula chave incompatível com a capacidade solicitada
+            }
+          } catch {
+            // Ignora erro de JSON
+          }
+        }
+
+        // 3. Controle Fino de Quota e Rotação Automática (Regras 90% e 100%)
+        let effectivePriority = key.priority;
+        let effectiveStatus = key.status;
+
+        if (key.tokenLimitMonthly > 0) {
+          const percentUsed = (key.tokensUsedMonth / key.tokenLimitMonthly) * 100;
+
+          // REGRA 100%: Quando atingir 100% -> Bloquear novas chamadas
+          if (key.tokensUsedMonth >= key.tokenLimitMonthly) {
+            if (key.status !== "BLOCKED_QUOTA") {
+              await prisma.apiKey.update({
+                where: { id: key.id },
+                data: { status: "BLOCKED_QUOTA" },
+              }).catch(() => {});
+            }
+            continue; // Chave bloqueada não recebe nenhuma chamada
+          }
+
+          // REGRA 90%: Quando atingir 90% -> Retirar da prioridade e usar próxima API compatível
+          if (percentUsed >= 90) {
+            effectivePriority = key.priority + 50; // Rebaixa prioridade para fim da fila
+            effectiveStatus = "WARNING_90";
+            if (key.status !== "WARNING_90") {
+              await prisma.apiKey.update({
+                where: { id: key.id },
+                data: { status: "WARNING_90" },
+              }).catch(() => {});
+            }
+          } else if (key.status === "WARNING_90" || key.status === "BLOCKED_QUOTA") {
+            effectiveStatus = "ACTIVE";
+            await prisma.apiKey.update({
+              where: { id: key.id },
+              data: { status: "ACTIVE" },
+            }).catch(() => {});
+          }
+        }
+
+        eligibleKeys.push({
+          ...key,
+          effectivePriority,
+          effectiveStatus,
+          customBaseUrl: (key as any).customBaseUrl || provider.baseUrl,
+        });
+      }
+
+      // Ordena prioritariamente por effectivePriority (menor número = maior prioridade)
+      // e desempata por tokensUsedMonth (load balancing de menor consumo)
+      eligibleKeys.sort((a, b) => {
+        if (a.effectivePriority !== b.effectivePriority) {
+          return a.effectivePriority - b.effectivePriority;
+        }
+        return a.tokensUsedMonth - b.tokensUsedMonth;
+      });
+
+      return eligibleKeys;
     },
-  });
-
-  if (!provider || provider.apiKeys.length === 0) {
-    return [];
-  }
-
-  const eligibleKeys: Array<any> = [];
-
-  for (const key of provider.apiKeys) {
-    // 1. Quarentena temporária por Rate Limit (429)
-    if (key.quarantinedUntil && key.quarantinedUntil > now) {
-      continue;
-    }
-
-    // 2. Validação estrita de Capacidades
-    // "Nunca enviar uma solicitação para um modelo sem capacidade compatível"
-    if (requiredCapability && requiredCapability !== "TEXTO") {
-      try {
-        const caps: string[] = JSON.parse(key.capabilities || "[]");
-        if (caps.length > 0 && !caps.includes(requiredCapability)) {
-          continue; // Pula chave incompatível com a capacidade solicitada
-        }
-      } catch {
-        // Ignora erro de JSON
-      }
-    }
-
-    // 3. Controle Fino de Quota e Rotação Automática (Regras 90% e 100%)
-    let effectivePriority = key.priority;
-    let effectiveStatus = key.status;
-
-    if (key.tokenLimitMonthly > 0) {
-      const percentUsed = (key.tokensUsedMonth / key.tokenLimitMonthly) * 100;
-
-      // REGRA 100%: Quando atingir 100% -> Bloquear novas chamadas
-      if (key.tokensUsedMonth >= key.tokenLimitMonthly) {
-        if (key.status !== "BLOCKED_QUOTA") {
-          await prisma.apiKey.update({
-            where: { id: key.id },
-            data: { status: "BLOCKED_QUOTA" },
-          }).catch(() => {});
-        }
-        continue; // Chave bloqueada não recebe nenhuma chamada
-      }
-
-      // REGRA 90%: Quando atingir 90% -> Retirar da prioridade e usar próxima API compatível
-      if (percentUsed >= 90) {
-        effectivePriority = key.priority + 50; // Rebaixa prioridade para fim da fila
-        effectiveStatus = "WARNING_90";
-        if (key.status !== "WARNING_90") {
-          await prisma.apiKey.update({
-            where: { id: key.id },
-            data: { status: "WARNING_90" },
-          }).catch(() => {});
-        }
-      } else if (key.status === "WARNING_90" || key.status === "BLOCKED_QUOTA") {
-        effectiveStatus = "ACTIVE";
-        await prisma.apiKey.update({
-          where: { id: key.id },
-          data: { status: "ACTIVE" },
-        }).catch(() => {});
-      }
-    }
-
-    eligibleKeys.push({
-      ...key,
-      effectivePriority,
-      effectiveStatus,
-      customBaseUrl: (key as any).customBaseUrl || provider.baseUrl,
-    });
-  }
-
-  // Ordena prioritariamente por effectivePriority (menor número = maior prioridade)
-  // e desempata por tokensUsedMonth (load balancing de menor consumo)
-  eligibleKeys.sort((a, b) => {
-    if (a.effectivePriority !== b.effectivePriority) {
-      return a.effectivePriority - b.effectivePriority;
-    }
-    return a.tokensUsedMonth - b.tokensUsedMonth;
-  });
-
-  return eligibleKeys;
+    15
+  );
 }
 
 /**
@@ -292,6 +306,7 @@ export async function markKeyError(apiKeyId: string, isRateLimit: boolean) {
       quarantinedUntil: shouldSetError || isRateLimit ? quarantinedUntil : null,
     },
   });
+  appCache.deletePattern(/^apikeys:/);
 }
 
 /**
@@ -329,6 +344,10 @@ export async function markKeySuccess(
       lastUsedAt: new Date(),
     },
   });
+
+  if (newStatus !== key.status) {
+    appCache.deletePattern(/^apikeys:/);
+  }
 }
 
 /**
@@ -702,16 +721,20 @@ async function callExternalProviderStream(params: {
 
     for (const testModel of candidateGoogleModels) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(new Error("Timeout ao conectar ao Google Gemini")), 20000);
       try {
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             contents,
             systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
             generationConfig: { maxOutputTokens: 4096 },
           }),
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const errText = await response.text();
@@ -729,6 +752,7 @@ async function callExternalProviderStream(params: {
 
         return createGeminiTransformStream(response.body!);
       } catch (err: any) {
+        clearTimeout(timeoutId);
         lastGoogleError = err;
         if (err.status === 503 || err.status === 404) {
           continue;
@@ -757,30 +781,40 @@ async function callExternalProviderStream(params: {
       content: m.content,
     }));
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: modelIdentifier,
-        messages: formattedMessages,
-        system: systemPrompt || undefined,
-        max_tokens: 4096,
-        stream: true,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(new Error("Timeout ao conectar à Anthropic")), 20000);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      const error: any = new Error(`Anthropic API error: ${response.status} ${errText}`);
-      error.status = response.status;
-      throw error;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: modelIdentifier,
+          messages: formattedMessages,
+          system: systemPrompt || undefined,
+          max_tokens: 4096,
+          stream: true,
+        }),
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        const error: any = new Error(`Anthropic API error: ${response.status} ${errText}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      return createAnthropicTransformStream(response.body!);
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
     }
-
-    return createAnthropicTransformStream(response.body!);
   }
 
   // 3. OpenAI Oficial OU Proxy OpenAI / Mirai API (OpenAI Codex ou Anthropic Claude via Mirai)
@@ -801,27 +835,37 @@ async function callExternalProviderStream(params: {
     }
     formattedMessages.push(...messages);
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: effectiveModel,
-        messages: formattedMessages,
-        stream: true,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(new Error("Timeout ao conectar à OpenAI")), 20000);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      const error: any = new Error(`API error (${endpoint}): ${response.status} ${errText}`);
-      error.status = response.status;
-      throw error;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: effectiveModel,
+          messages: formattedMessages,
+          stream: true,
+        }),
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        const error: any = new Error(`API error (${endpoint}): ${response.status} ${errText}`);
+        error.status = response.status;
+        throw error;
+      }
+
+      return createSseTransformStream(response.body!);
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
     }
-
-    return createSseTransformStream(response.body!);
   }
 
   throw new Error(`Provedor "${providerSlug}" não suportado.`);

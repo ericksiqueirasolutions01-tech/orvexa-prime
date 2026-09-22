@@ -256,6 +256,7 @@ model Message {
 
   @@index([conversationId])
   @@index([createdAt])
+  @@index([conversationId, createdAt])
 }
 
 model UsageLog {
@@ -279,6 +280,7 @@ model UsageLog {
   @@index([userId])
   @@index([createdAt])
   @@index([status])
+  @@index([userId, createdAt])
 }
 
 model File {
@@ -304,6 +306,7 @@ model File {
   @@index([conversationId])
   @@index([category])
   @@index([isGenerated])
+  @@index([userId, createdAt])
 }
 
 model AuditLog {
@@ -356,6 +359,7 @@ model GeneratedImage {
 
   @@index([userId])
   @@index([createdAt])
+  @@index([userId, createdAt])
 }
 
 model Project {
@@ -416,6 +420,8 @@ model UserMemory {
   @@index([userId])
   @@index([category])
   @@index([key])
+  @@index([userId, category])
+  @@index([userId, importance])
 }
 
 model ConversationMemory {

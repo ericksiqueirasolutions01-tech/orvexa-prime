@@ -10,6 +10,7 @@
 // ============================================================================
 
 import { prisma } from "./prisma";
+import { appCache } from "./cache";
 
 export interface PlanConfig {
   name: string;
@@ -176,113 +177,116 @@ function formatBytes(bytes: number): string {
  * Obtém o resumo consolidado de consumo dos 5 vetores no ciclo mensal
  */
 export async function getUserConsumption(userId: string): Promise<UserConsumptionSummary> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: {
-      plan: true,
-      subscriptions: {
-        where: { status: "ACTIVE" },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      },
-    },
-  });
+  const cacheKey = `consumption:${userId}`;
+  return appCache.getOrSet(
+    cacheKey,
+    async () => {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          plan: true,
+          subscriptions: {
+            where: { status: "ACTIVE" },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
 
-  if (!user) {
-    throw new Error(`Usuário não encontrado: ${userId}`);
-  }
+      if (!user) {
+        throw new Error(`Usuário não encontrado: ${userId}`);
+      }
 
-  const activeSub = user.subscriptions[0] || null;
+      const activeSub = user.subscriptions[0] || null;
 
-  // Determinar início e fim do ciclo
-  let cycleStart = new Date();
-  cycleStart.setDate(1);
-  cycleStart.setHours(0, 0, 0, 0);
+      // Determinar início e fim do ciclo
+      let cycleStart = new Date();
+      cycleStart.setDate(1);
+      cycleStart.setHours(0, 0, 0, 0);
 
-  let cycleEnd = new Date(cycleStart);
-  cycleEnd.setMonth(cycleEnd.getMonth() + 1);
+      let cycleEnd = new Date(cycleStart);
+      cycleEnd.setMonth(cycleEnd.getMonth() + 1);
 
-  if (activeSub?.currentPeriodStart && activeSub?.currentPeriodEnd) {
-    cycleStart = new Date(activeSub.currentPeriodStart);
-    cycleEnd = new Date(activeSub.currentPeriodEnd);
-  }
+      if (activeSub?.currentPeriodStart && activeSub?.currentPeriodEnd) {
+        cycleStart = new Date(activeSub.currentPeriodStart);
+        cycleEnd = new Date(activeSub.currentPeriodEnd);
+      }
 
-  const now = new Date();
-  const msRemaining = Math.max(0, cycleEnd.getTime() - now.getTime());
-  const daysRemaining = Math.ceil(msRemaining / (1000 * 60 * 60 * 24));
+      const now = new Date();
+      const msRemaining = Math.max(0, cycleEnd.getTime() - now.getTime());
+      const daysRemaining = Math.ceil(msRemaining / (1000 * 60 * 60 * 24));
 
-  // Quotas do plano (com fallback na config canônica)
-  const planSlug = (user.plan?.slug || "free").toLowerCase() as keyof typeof PLANS_CONFIG;
-  const planDefaults = PLANS_CONFIG[planSlug] || PLANS_CONFIG["free"];
+      // Quotas do plano (com fallback na config canônica)
+      const planSlug = (user.plan?.slug || "free").toLowerCase() as keyof typeof PLANS_CONFIG;
+      const planDefaults = PLANS_CONFIG[planSlug] || PLANS_CONFIG["free"];
 
-  const planName = user.plan?.name || planDefaults.name;
-  const priceCents = user.plan?.priceCents ?? planDefaults.priceCents;
-  const monthlyMessagesLimit = user.plan?.monthlyMessages ?? planDefaults.monthlyMessages;
-  const monthlyFilesLimit = user.plan?.monthlyFiles ?? planDefaults.monthlyFiles;
-  const monthlyImagesLimit = user.plan?.monthlyImages ?? planDefaults.monthlyImages;
-  const monthlyTokensLimit = user.plan?.monthlyTokens ?? planDefaults.monthlyTokens;
-  const storageLimitBytes = user.plan?.storageQuotaBytes ?? planDefaults.storageQuotaBytes;
+      const planName = user.plan?.name || planDefaults.name;
+      const priceCents = user.plan?.priceCents ?? planDefaults.priceCents;
+      const monthlyMessagesLimit = user.plan?.monthlyMessages ?? planDefaults.monthlyMessages;
+      const monthlyFilesLimit = user.plan?.monthlyFiles ?? planDefaults.monthlyFiles;
+      const monthlyImagesLimit = user.plan?.monthlyImages ?? planDefaults.monthlyImages;
+      const monthlyTokensLimit = user.plan?.monthlyTokens ?? planDefaults.monthlyTokens;
+      const storageLimitBytes = user.plan?.storageQuotaBytes ?? planDefaults.storageQuotaBytes;
 
-  let allowedAgents: string[] = planDefaults.allowedAgents;
-  if (user.plan?.allowedAgents) {
-    try {
-      allowedAgents = JSON.parse(user.plan.allowedAgents);
-    } catch {}
-  }
+      let allowedAgents: string[] = planDefaults.allowedAgents;
+      if (user.plan?.allowedAgents) {
+        try {
+          allowedAgents = JSON.parse(user.plan.allowedAgents);
+        } catch {}
+      }
 
-  // Se ADMIN, limites infinitos
-  const isAdmin = user.role === "ADMIN";
+      const isAdmin = user.role === "ADMIN";
 
-  // 1. Mensagens enviadas pelo usuário no ciclo
-  const messagesUsed = await prisma.message.count({
-    where: {
-      conversation: { userId },
-      role: "USER",
-      createdAt: { gte: cycleStart },
-    },
-  });
+      // Execução paralela de todas as 6 consultas de métricas do ciclo
+      const [
+        messagesUsed,
+        filesUsed,
+        imagesUsed,
+        agentsUsed,
+        storageAgg,
+        tokensAgg,
+      ] = await Promise.all([
+        prisma.message.count({
+          where: {
+            conversation: { userId },
+            role: "USER",
+            createdAt: { gte: cycleStart },
+          },
+        }),
+        prisma.file.count({
+          where: {
+            userId,
+            createdAt: { gte: cycleStart },
+          },
+        }),
+        prisma.generatedImage.count({
+          where: {
+            userId,
+            createdAt: { gte: cycleStart },
+          },
+        }),
+        prisma.conversation.count({
+          where: {
+            userId,
+            agentId: { not: null },
+            createdAt: { gte: cycleStart },
+          },
+        }),
+        prisma.file.aggregate({
+          where: { userId },
+          _sum: { fileSizeBytes: true },
+        }),
+        prisma.usageLog.aggregate({
+          where: {
+            userId,
+            createdAt: { gte: cycleStart },
+          },
+          _sum: { totalTokens: true },
+        }),
+      ]);
 
-  // 2. Arquivos processados no ciclo
-  const filesUsed = await prisma.file.count({
-    where: {
-      userId,
-      createdAt: { gte: cycleStart },
-    },
-  });
-
-  // 3. Imagens geradas no ciclo
-  const imagesUsed = await prisma.generatedImage.count({
-    where: {
-      userId,
-      createdAt: { gte: cycleStart },
-    },
-  });
-
-  // 4. Sessões de agentes especialistas no ciclo
-  const agentsUsed = await prisma.conversation.count({
-    where: {
-      userId,
-      agentId: { not: null },
-      createdAt: { gte: cycleStart },
-    },
-  });
-
-  // 5. Armazenamento total consumido (todos os arquivos ativos do usuário)
-  const storageAgg = await prisma.file.aggregate({
-    where: { userId },
-    _sum: { fileSizeBytes: true },
-  });
-  const storageUsedBytes = storageAgg._sum.fileSizeBytes || 0;
-
-  // Tokens consumidos no ciclo
-  const tokensAgg = await prisma.usageLog.aggregate({
-    where: {
-      userId,
-      createdAt: { gte: cycleStart },
-    },
-    _sum: { totalTokens: true },
-  });
-  const tokensUsed = tokensAgg._sum.totalTokens || 0;
+      const storageUsedBytes = storageAgg._sum.fileSizeBytes || 0;
+      const tokensUsed = tokensAgg._sum.totalTokens || 0;
 
   // Função auxiliar para métrica
   const buildMetric = (used: number, limit: number): UsageMetric => {
@@ -378,6 +382,16 @@ export async function getUserConsumption(userId: string): Promise<UserConsumptio
     hasExceededAny,
     hasWarningAny,
   };
+    },
+    15
+  );
+}
+
+/**
+ * Invalida o cache de consumo do usuário após envio de mensagens, uploads ou imagens
+ */
+export function invalidateUserConsumptionCache(userId: string): void {
+  appCache.delete(`consumption:${userId}`);
 }
 
 // ============================================================================
@@ -388,9 +402,10 @@ export async function getUserConsumption(userId: string): Promise<UserConsumptio
  * 1. Valida se o usuário pode enviar mensagens de chat
  */
 export async function assertCanSendMessage(
-  userId: string
+  userId: string,
+  preloadedSummary?: UserConsumptionSummary
 ): Promise<{ allowed: boolean; reason?: string; usage?: UsageMetric }> {
-  const summary = await getUserConsumption(userId);
+  const summary = preloadedSummary || (await getUserConsumption(userId));
   if (summary.role === "ADMIN") return { allowed: true };
 
   if (summary.status !== "ACTIVE" && summary.status !== "PENDING_PAYMENT" && summary.plan.slug !== "free") {
@@ -466,9 +481,10 @@ export async function assertCanGenerateImage(
  */
 export async function assertCanUseAgent(
   userId: string,
-  agentSlug: string
+  agentSlug: string,
+  preloadedSummary?: UserConsumptionSummary
 ): Promise<{ allowed: boolean; reason?: string }> {
-  const summary = await getUserConsumption(userId);
+  const summary = preloadedSummary || (await getUserConsumption(userId));
   if (summary.role === "ADMIN") return { allowed: true };
 
   const allowedSlugs = summary.plan.allowedAgents;

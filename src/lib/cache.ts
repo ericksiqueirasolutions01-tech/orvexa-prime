@@ -62,6 +62,19 @@ class InMemoryCache {
     this.store.delete(key);
   }
 
+  public deletePattern(pattern: RegExp | string): number {
+    let deleted = 0;
+    const isRegex = pattern instanceof RegExp;
+    for (const key of this.store.keys()) {
+      const matches = isRegex ? (pattern as RegExp).test(key) : key.startsWith(pattern as string);
+      if (matches) {
+        this.store.delete(key);
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
   public clear(): void {
     this.store.clear();
     this.hits = 0;

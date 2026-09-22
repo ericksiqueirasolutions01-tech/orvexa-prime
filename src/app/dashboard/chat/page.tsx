@@ -42,7 +42,6 @@ import {
   Megaphone,
   Wrench,
 } from "lucide-react";
-import * as XLSX from "xlsx";
 import { ProcessingIndicator } from "@/components/ui/processing-indicator";
 
 interface ChatMessage {
@@ -655,6 +654,7 @@ function ChatContent() {
         continue;
       } else if (ext === "xlsx" || ext === "xls") {
         try {
+          const XLSX = await import("xlsx");
           const buffer = await file.arrayBuffer();
           const workbook = XLSX.read(buffer, { type: "array" });
           let sheetData = "";

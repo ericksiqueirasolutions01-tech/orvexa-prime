@@ -55,14 +55,45 @@ export async function searchAllMemories(
   const queryVector = generateDenseEmbedding(query);
   const results: SemanticSearchResultItem[] = [];
 
-  // 1. MEMÓRIA DO USUÁRIO
-  if (scope === "ALL" || scope === "USER") {
-    const userMemories = await prisma.userMemory.findMany({
-      where: { userId },
-      orderBy: { updatedAt: "desc" },
-      take: 50,
-    });
+  // Executa consultas concorrentes nas 4 camadas de memória simultaneamente
+  const [userMemories, convMemories, fileChunks, agentMemories] = await Promise.all([
+    scope === "ALL" || scope === "USER"
+      ? prisma.userMemory.findMany({
+          where: { userId },
+          orderBy: { updatedAt: "desc" },
+          take: 50,
+        })
+      : Promise.resolve([]),
+    scope === "ALL" || scope === "CONVERSATION"
+      ? prisma.conversationMemory.findMany({
+          where: {
+            userId,
+            conversationId: conversationId ? { not: conversationId } : undefined,
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 40,
+        })
+      : Promise.resolve([]),
+    scope === "ALL" || scope === "FILE"
+      ? prisma.fileKnowledge.findMany({
+          where: {
+            userId,
+            fileId: allowedFileIds && allowedFileIds.length > 0 ? { in: allowedFileIds } : undefined,
+          },
+          take: 100,
+        })
+      : Promise.resolve([]),
+    scope === "ALL" || scope === "AGENT"
+      ? prisma.agentMemory.findMany({
+          where: { userId },
+          include: { agent: true },
+          take: 30,
+        })
+      : Promise.resolve([]),
+  ]);
 
+  // 1. PROCESSAMENTO DE MEMÓRIA DO USUÁRIO
+  if (userMemories.length > 0) {
     for (const mem of userMemories) {
       let vec = deserializeEmbedding(mem.embedding);
       if (!vec) {
@@ -99,18 +130,8 @@ export async function searchAllMemories(
     }
   }
 
-  // 2. MEMÓRIA DAS CONVERSAS ANTERIORES
-  if (scope === "ALL" || scope === "CONVERSATION") {
-    const convMemories = await prisma.conversationMemory.findMany({
-      where: {
-        userId,
-        // Exclui a conversa atual para não duplicar contexto do histórico ativo
-        conversationId: conversationId ? { not: conversationId } : undefined,
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 40,
-    });
-
+  // 2. PROCESSAMENTO DE MEMÓRIA DAS CONVERSAS ANTERIORES
+  if (convMemories.length > 0) {
     for (const conv of convMemories) {
       let vec = deserializeEmbedding(conv.embedding);
       if (!vec) {
@@ -148,17 +169,8 @@ export async function searchAllMemories(
     }
   }
 
-  // 3. CONHECIMENTO DOS ARQUIVOS (FILE KNOWLEDGE)
-  if (scope === "ALL" || scope === "FILE") {
-    // Filtro estrito de permissão: arquivos do próprio usuário
-    const fileChunks = await prisma.fileKnowledge.findMany({
-      where: {
-        userId,
-        fileId: allowedFileIds && allowedFileIds.length > 0 ? { in: allowedFileIds } : undefined,
-      },
-      take: 100,
-    });
-
+  // 3. PROCESSAMENTO DE CONHECIMENTO DOS ARQUIVOS (FILE KNOWLEDGE)
+  if (fileChunks.length > 0) {
     for (const chunk of fileChunks) {
       let vec = deserializeEmbedding(chunk.embedding);
       if (!vec) {
@@ -191,14 +203,8 @@ export async function searchAllMemories(
     }
   }
 
-  // 4. MEMÓRIA DOS AGENTES
-  if (scope === "ALL" || scope === "AGENT") {
-    const agentMemories = await prisma.agentMemory.findMany({
-      where: { userId },
-      include: { agent: true },
-      take: 30,
-    });
-
+  // 4. PROCESSAMENTO DE MEMÓRIA DOS AGENTES
+  if (agentMemories.length > 0) {
     for (const am of agentMemories) {
       let vec = deserializeEmbedding(am.embedding);
       if (!vec) {

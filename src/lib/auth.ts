@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { cookies, headers } from "next/headers";
 import { prisma } from "./prisma";
+import { appCache } from "./cache";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "orvexa_prime_super_secret_jwt_key_2026_production_grade_token_guard"
@@ -67,18 +68,25 @@ export async function getCurrentUser(): Promise<UserSession | null> {
   const session = await verifyAuthToken(token);
   if (!session?.id) return null;
 
-  // Real-time lookup to ensure user wasn't blocked or altered
-  const user = await prisma.user.findUnique({
-    where: { id: session.id },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      status: true,
-      planId: true,
+  // Cache L1 com TTL de 10s para aliviar o banco em requisições concorrentes
+  const cacheKey = `user_session:${session.id}`;
+  const user = await appCache.getOrSet(
+    cacheKey,
+    async () => {
+      return prisma.user.findUnique({
+        where: { id: session.id },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          status: true,
+          planId: true,
+        },
+      });
     },
-  });
+    10
+  );
 
   if (!user) return null;
   if (user.status === "BLOCKED") return null;
@@ -92,4 +100,12 @@ export async function getCurrentUser(): Promise<UserSession | null> {
     planId: user.planId,
   };
 }
+
+/**
+ * Invalida imediatamente o cache de sessão do usuário (ex: após upgrade, bloqueio ou alteração de role)
+ */
+export function invalidateUserSessionCache(userId: string): void {
+  appCache.delete(`user_session:${userId}`);
+}
+
 
