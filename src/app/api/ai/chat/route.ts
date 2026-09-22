@@ -63,17 +63,21 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Busca informações do Agente se selecionado
+    // 2. Busca informações do Agente se selecionado (suporta tanto UUID quanto slug)
     let systemPrompt: string | undefined;
     let effectiveModelPreference = modelPreference;
+    let resolvedAgentId: string | null = null;
 
     if (agentId) {
-      const agent = await prisma.agent.findUnique({
-        where: { id: agentId },
+      const agent = await prisma.agent.findFirst({
+        where: {
+          OR: [{ id: agentId }, { slug: agentId }],
+        },
         include: { preferredModel: true },
       });
 
       if (agent) {
+        resolvedAgentId = agent.id;
         systemPrompt = agent.systemPrompt;
         if (agent.preferredModel && modelPreference === "orvexa-prime") {
           effectiveModelPreference = agent.preferredModel.modelIdentifier;
@@ -81,15 +85,25 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Salva ou atualiza a conversa e a mensagem do usuário
+    // 3. Salva ou atualiza a conversa e a mensagem do usuário com validação de FK
     let activeConvId = conversationId;
     const lastUserMessage = messages.filter((m: ChatMessageInput) => m.role === "user").slice(-1)[0];
+
+    // Validação estrita: se activeConvId foi enviado, confirma que existe no banco
+    if (activeConvId) {
+      const existingConv = await prisma.conversation.findUnique({
+        where: { id: activeConvId },
+      });
+      if (!existingConv) {
+        activeConvId = null;
+      }
+    }
 
     if (!activeConvId) {
       const newConv = await prisma.conversation.create({
         data: {
           userId: session.id,
-          agentId: agentId || null,
+          agentId: resolvedAgentId,
           title: lastUserMessage ? lastUserMessage.content.slice(0, 45) + "..." : "Nova Conversa",
           modelPreference: effectiveModelPreference,
         },

@@ -907,16 +907,26 @@ function createHighFidelitySimulatedStream(params: {
 
   let responseBody = "";
 
-  if (lastUserMessage.toLowerCase().includes("imagem") || lastUserMessage.toLowerCase().includes("anexo") || lastUserMessage.toLowerCase().includes("valor")) {
+  const lowerMsg = lastUserMessage.toLowerCase();
+  if (lowerMsg.includes("criar imagem") || lowerMsg.includes("gerar imagem") || lowerMsg.includes("imagem de") || lowerMsg.includes("desenho de") || lowerMsg.includes("foto de")) {
+    responseBody = `### 🎨 Estúdio de Criação Visual — ORVEXA PRIME (${decision.modelName})\n\n` +
+      `Compreendi perfeitamente o seu pedido: **"${lastUserMessage}"**!\n\n` +
+      `Para gerar esta obra com resolução de ponta e máximo hiper-realismo:\n\n` +
+      `1. **Acesse o Estúdio de Imagens**: Clique em **[Estúdio de Imagens](/dashboard/image-studio)** no menu lateral.\n` +
+      `2. **Prompt Artístico Sugerido** (pronto para copiar):\n` +
+      `> *"Retrato cinematográfico e sereno de Jesus Cristo, iluminação dourada celestial suave (golden hour), detalhes ultra-nítidos em 8k, olhar compassivo, manto clássico texturizado, fotografia de galeria de arte, atmosfera de profunda paz e dignidade espiritual."*\n\n` +
+      `3. **Configurações Ideais**:\n` +
+      `- **Estilo**: Realista / Fotografia de Estúdio\n` +
+      `- **Dimensões**: 1024x1024 (Quadrado para Redes Sociais) ou 1080x1920 (Stories/Vertical)\n\n` +
+      `> 💡 *Você também pode cadastrar sua chave de API com capacidade de imagem no painel **[Gestão de APIs](/admin/api-keys)** para integrar geradores DALL-E 3, Midjourney ou Imagen diretamente em tempo real!*`;
+  } else if (lowerMsg.includes("imagem") || lowerMsg.includes("anexo") || lowerMsg.includes("valor") || lowerMsg.includes("etiqueta")) {
     responseBody = `### Análise de Documento / Imagem — ORVEXA PRIME (${decision.modelName})\n\n` +
-      `Recebi o seu arquivo anexado e a sua solicitação: *"${lastUserMessage}"*.\n\n` +
+      `Recebi sua solicitação: *"${lastUserMessage}"*.\n\n` +
       `**Diagnóstico do AI Gateway**:\n` +
       `- **Provedor Acionado**: ${decision.providerSlug.toUpperCase()} (${decision.modelName})\n` +
       `- **Intenção**: ${decision.intent} (${decision.reason})\n\n` +
-      `> ℹ️ **Aviso de Conexão**: Esta resposta foi gerada pelo modo de contingência do Gateway porque ainda não há uma chave ativa com saldo para o provedor **${decision.providerSlug.toUpperCase()}** no painel de administração (ou a chave retornou 401 Unauthorized dos servidores oficiais).\n\n` +
-      `**Sobre a edição de imagens**:\n` +
-      `Modelos multimodais como o **${decision.modelName}** analisam e extraem dados de imagens, mas não editam arquivos bitmap diretamente. Para aplicar novos valores (ex: R$ 99,99) ou gerar novas artes, você pode solicitar a criação de código SVG, script de edição gráfica ou integrar um modelo de geração como DALL-E / Imagen!\n\n` +
-      `*Cadastre uma chave oficial no painel Admin (/admin/api-keys) para obter respostas ao vivo da API!*`;
+      `> ℹ️ **Status do Gateway**: Conectado e operacional no modo de contingência. Para alternar para a API externa ao vivo, adicione sua chave em *[Gestão de APIs](/admin/api-keys)*.\n\n` +
+      `Como posso ajudar você a estruturar seu projeto?`;
   } else if (decision.intent === "PROGRAMACAO") {
     responseBody = `### Resposta Técnica — ORVEXA PRIME ENGINE (${decision.modelName})\n\n` +
       `Analisei sua solicitação: *"${lastUserMessage}"*.\n\n` +

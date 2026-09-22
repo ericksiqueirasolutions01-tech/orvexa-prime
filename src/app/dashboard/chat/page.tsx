@@ -697,6 +697,7 @@ function ChatContent() {
       });
 
       if (!response.ok) {
+        setConversationId(null);
         const errJson = await response.json().catch(() => ({}));
         throw new Error(errJson.error || `Erro HTTP ${response.status}`);
       }
