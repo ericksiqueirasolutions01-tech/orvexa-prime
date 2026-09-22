@@ -278,12 +278,17 @@ export async function markKeyError(apiKeyId: string, isRateLimit: boolean) {
   const quarantineMinutes = isRateLimit ? 2 : 5;
   const quarantinedUntil = new Date(Date.now() + quarantineMinutes * 60 * 1000);
 
+  const key = await prisma.apiKey.findUnique({ where: { id: apiKeyId } });
+  const currentErrors = (key?.errorCount || 0) + 1;
+  const shouldSetError = currentErrors >= 3;
+  const statusToSet = isRateLimit ? "RATE_LIMITED" : (shouldSetError ? "ERROR" : (key?.status || "ACTIVE"));
+
   await prisma.apiKey.update({
     where: { id: apiKeyId },
     data: {
-      status: isRateLimit ? "RATE_LIMITED" : "ERROR",
+      status: statusToSet,
       errorCount: { increment: 1 },
-      quarantinedUntil,
+      quarantinedUntil: shouldSetError || isRateLimit ? quarantinedUntil : null,
     },
   });
 }
@@ -395,16 +400,19 @@ DIRETRIZES FUNDAMENTAIS PARA AJUSTES DE PREÇOS, ETIQUETAS E PRODUTOS:
     };
   } else if (selectedModelPreference === "gemini") {
     const m = await prisma.aiModel.findFirst({
-      where: { modelIdentifier: "gemini-1.5-pro" },
+      where: {
+        modelIdentifier: { in: ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-3.6-flash", "gemini-flash-latest", "gemini-1.5-pro"] },
+        isActive: true,
+      },
       include: { provider: true },
     });
     decision = {
       intent: "MANUAL_GEMINI",
       providerSlug: "google",
-      modelIdentifier: m?.modelIdentifier || "gemini-1.5-pro",
-      modelName: m?.name || "Gemini 1.5 Pro",
+      modelIdentifier: m?.modelIdentifier || "gemini-3-flash-preview",
+      modelName: m?.name || "Gemini 3 Flash",
       modelId: m?.id || "",
-      reason: "Seleção direta pelo usuário: Google Gemini 1.5 Pro",
+      reason: "Seleção direta pelo usuário: Google Gemini (Alta Performance)",
       requiredCapability: inferredCapability,
     };
   } else {
@@ -522,7 +530,12 @@ DIRETRIZES FUNDAMENTAIS PARA AJUSTES DE PREÇOS, ETIQUETAS E PRODUTOS:
       } catch (err: any) {
         console.warn(`[AI Gateway] Falha na chave ${activeKey.name}:`, err.message);
         const isRateLimit = err.status === 429 || err.message?.includes("429") || err.message?.includes("rate_limit");
-        await markKeyError(activeKey.id, isRateLimit);
+        const isTransient503 = err.status === 503 || err.message?.includes("503") || err.message?.includes("high demand") || err.message?.includes("UNAVAILABLE");
+        
+        // Picos transitórios de demanda do provedor não devem colocar a chave em erro/quarentena
+        if (!isTransient503) {
+          await markKeyError(activeKey.id, isRateLimit);
+        }
         // Continua o loop para a próxima chave (Failover automático)
       }
     }
@@ -650,55 +663,78 @@ async function callExternalProviderStream(params: {
       effectiveModel = modelIdentifier;
     } else if (providerSlug === "openai" || modelIdentifier.includes("gpt") || modelIdentifier.includes("codex")) {
       effectiveModel = "gpt-5.6-sol";
-    } else if (providerSlug === "anthropic" || modelIdentifier.includes("claude") || modelIdentifier.includes("fable")) {
-      effectiveModel = "claude-fable-5.1";
+    } else if (providerSlug === "anthropic" || modelIdentifier.includes("claude") || modelIdentifier.includes("fable") || modelIdentifier.includes("sonnet")) {
+      effectiveModel = "claude-sonnet-5";
     } else if (providerSlug === "google" || modelIdentifier.includes("gemini")) {
       effectiveModel = "gemini-3.8";
     }
   }
 
-  // Se for OpenAI OU for um proxy com formato OpenAI (como Mirai API)
-  if (providerSlug === "openai" || isMirai || (customBaseUrl && !apiKey.startsWith("sk-ant-"))) {
-    let endpoint = "https://api.openai.com/v1/chat/completions";
-    if (customBaseUrl) {
-      const trimmed = customBaseUrl.trim().replace(/\/+$/, "");
-      endpoint = trimmed.endsWith("/chat/completions")
-        ? trimmed
-        : trimmed.endsWith("/v1")
-        ? `${trimmed}/chat/completions`
-        : `${trimmed}/v1/chat/completions`;
+  // 1. Google Gemini Oficial (Google AI Studio)
+  if (providerSlug === "google") {
+    const contents = messages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+    // Determina candidatos de modelo: se for antigo/descontinuado, usa gemini-3-flash-preview
+    let primaryModel = modelIdentifier;
+    const legacyGoogle = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"];
+    if (legacyGoogle.includes(primaryModel) || !primaryModel) {
+      primaryModel = "gemini-3-flash-preview";
     }
 
-    const formattedMessages: any[] = [];
-    if (systemPrompt) {
-      formattedMessages.push({ role: "system", content: systemPrompt });
+    const candidateGoogleModels = [
+      primaryModel,
+      "gemini-3-flash-preview",
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3.6-flash",
+    ].filter((v, i, a) => a.indexOf(v) === i);
+
+    let lastGoogleError: any = null;
+
+    for (const testModel of candidateGoogleModels) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents,
+            systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+            generationConfig: { maxOutputTokens: 4096 },
+          }),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          const error: any = new Error(`Gemini API error (${testModel}): ${response.status} ${errText}`);
+          error.status = response.status;
+          lastGoogleError = error;
+
+          // Se for 503 (alta demanda) ou 404 (modelo descontinuado), tenta o próximo modelo silenciosamente
+          if (response.status === 503 || response.status === 404) {
+            console.warn(`[AI Gateway Google] Modelo ${testModel} indisponível (${response.status}), tentando modelo alternativo...`);
+            continue;
+          }
+          throw error;
+        }
+
+        return createGeminiTransformStream(response.body!);
+      } catch (err: any) {
+        lastGoogleError = err;
+        if (err.status === 503 || err.status === 404) {
+          continue;
+        }
+        throw err;
+      }
     }
-    formattedMessages.push(...messages);
 
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: effectiveModel,
-        messages: formattedMessages,
-        stream: true,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      const error: any = new Error(`API error (${endpoint}): ${response.status} ${errText}`);
-      error.status = response.status;
-      throw error;
-    }
-
-    return createSseTransformStream(response.body!);
+    throw lastGoogleError || new Error(`Google Gemini indisponível no momento.`);
   }
 
-  if (providerSlug === "anthropic") {
+  // 2. Anthropic Oficial (sk-ant-...) direto na API da Anthropic
+  if (providerSlug === "anthropic" && !isMirai) {
     let endpoint = "https://api.anthropic.com/v1/messages";
     if (customBaseUrl) {
       const trimmed = customBaseUrl.trim().replace(/\/+$/, "");
@@ -740,31 +776,45 @@ async function callExternalProviderStream(params: {
     return createAnthropicTransformStream(response.body!);
   }
 
-  if (providerSlug === "google") {
-    const contents = messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+  // 3. OpenAI Oficial OU Proxy OpenAI / Mirai API (OpenAI Codex ou Anthropic Claude via Mirai)
+  if (providerSlug === "openai" || isMirai || customBaseUrl) {
+    let endpoint = "https://api.openai.com/v1/chat/completions";
+    if (customBaseUrl) {
+      const trimmed = customBaseUrl.trim().replace(/\/+$/, "");
+      endpoint = trimmed.endsWith("/chat/completions")
+        ? trimmed
+        : trimmed.endsWith("/v1")
+        ? `${trimmed}/chat/completions`
+        : `${trimmed}/v1/chat/completions`;
+    }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelIdentifier}:streamGenerateContent?alt=sse&key=${apiKey}`;
-    const response = await fetch(url, {
+    const formattedMessages: any[] = [];
+    if (systemPrompt) {
+      formattedMessages.push({ role: "system", content: systemPrompt });
+    }
+    formattedMessages.push(...messages);
+
+    const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
-        contents,
-        systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-        generationConfig: { maxOutputTokens: 4096 },
+        model: effectiveModel,
+        messages: formattedMessages,
+        stream: true,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      const error: any = new Error(`Gemini API error: ${response.status} ${errText}`);
+      const error: any = new Error(`API error (${endpoint}): ${response.status} ${errText}`);
       error.status = response.status;
       throw error;
     }
 
-    return createGeminiTransformStream(response.body!);
+    return createSseTransformStream(response.body!);
   }
 
   throw new Error(`Provedor "${providerSlug}" não suportado.`);

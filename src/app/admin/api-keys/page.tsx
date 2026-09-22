@@ -75,6 +75,7 @@ export default function AdminApiKeysPage() {
     message?: string;
   } | null>(null);
   const [testingKey, setTestingKey] = useState(false);
+  const [testingRowId, setTestingRowId] = useState<string | null>(null);
 
   const fetchKeys = async () => {
     try {
@@ -323,6 +324,35 @@ export default function AdminApiKeysPage() {
       fetchKeys();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleTestExistingKey = async (keyId: string, keyName: string) => {
+    setTestingRowId(keyId);
+    setFeedback(null);
+    try {
+      const res = await fetch("/api/admin/api-keys/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setFeedback({
+          type: "success",
+          message: data.message || `Chave "${keyName}" testada com sucesso! (${data.latencyMs}ms)`,
+        });
+        fetchKeys();
+      } else {
+        setFeedback({
+          type: "error",
+          message: `Falha no teste da chave "${keyName}": ${data.error || "Erro desconhecido"}`,
+        });
+      }
+    } catch (err: any) {
+      setFeedback({ type: "error", message: err.message });
+    } finally {
+      setTestingRowId(null);
     }
   };
 
@@ -876,6 +906,17 @@ export default function AdminApiKeysPage() {
                         )}
                       </td>
                       <td className="py-3 px-3 text-right space-x-1 whitespace-nowrap">
+                        {/* Botão de Testar Conexão em Tempo Real */}
+                        <button
+                          onClick={() => handleTestExistingKey(k.id, k.name)}
+                          disabled={testingRowId === k.id}
+                          title="Testar conexão em tempo real com os servidores da API"
+                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-cyan-950/60 text-cyan-300 hover:text-cyan-200 border border-slate-700 hover:border-cyan-500/40 text-[10px] font-bold transition-all inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <Activity className={`w-2.5 h-2.5 ${testingRowId === k.id ? "animate-spin text-cyan-400" : "text-cyan-400"}`} />
+                          {testingRowId === k.id ? "Testando..." : "Testar"}
+                        </button>
+
                         {/* Botão de Zerar Quota */}
                         {k.tokenLimitMonthly > 0 && (
                           <button
