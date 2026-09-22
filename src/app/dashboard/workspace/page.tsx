@@ -24,10 +24,13 @@ import {
   Layers,
   AlertCircle,
   FileCheck,
-  ChevronRight,
   HardDrive,
   ZoomIn,
+  LayoutGrid,
+  List,
 } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
+import { CardSkeleton, TableSkeleton } from "@/components/ui/skeleton";
 
 interface WorkspaceFile {
   id: string;
@@ -63,6 +66,9 @@ export default function WorkspacePage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [isDragging, setIsDragging] = useState(false);
 
   // Modal de Preview
   const [previewFile, setPreviewFile] = useState<WorkspaceFile | null>(null);
@@ -116,16 +122,15 @@ export default function WorkspacePage() {
     fetchFiles();
   }, [categoryFilter]);
 
-  // Upload múltiplo
-  const handleUploadFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+  const uploadFilesList = async (filesToUpload: FileList | File[]) => {
+    if (!filesToUpload || filesToUpload.length === 0) return;
 
     setUploading(true);
     setError(null);
     const formData = new FormData();
 
-    for (let i = 0; i < e.target.files.length; i++) {
-      formData.append("files", e.target.files[i]);
+    for (let i = 0; i < filesToUpload.length; i++) {
+      formData.append("files", filesToUpload[i]);
     }
 
     try {
@@ -137,14 +142,41 @@ export default function WorkspacePage() {
       if (!res.ok) {
         throw new Error(data.error || "Falha no upload.");
       }
+      toast.success(
+        "Upload concluído!",
+        `${data.count || filesToUpload.length} arquivo(s) adicionado(s) com sucesso ao seu workspace.`
+      );
       await fetchFiles();
     } catch (err: any) {
       setError(err.message || "Erro ao enviar arquivos.");
+      toast.error("Falha no upload", err.message || "Não foi possível enviar os arquivos.");
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  };
+
+  const handleUploadFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) uploadFilesList(e.target.files);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      uploadFilesList(e.dataTransfer.files);
     }
   };
 
@@ -156,10 +188,14 @@ export default function WorkspacePage() {
       if (res.ok) {
         setFiles((prev) => prev.filter((f) => f.id !== id));
         if (previewFile?.id === id) setPreviewFile(null);
+        toast.info("Arquivo removido", "O arquivo foi excluído com segurança do workspace.");
         fetchFiles();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error("Erro ao excluir", data.error || "Não foi possível remover o arquivo.");
       }
     } catch (err) {
-      console.error(err);
+      toast.error("Erro de conexão", "Falha ao solicitar exclusão do arquivo.");
     }
   };
 
@@ -354,122 +390,251 @@ export default function WorkspacePage() {
           ))}
         </div>
 
-        {/* Input de Busca */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            fetchFiles();
-          }}
-          className="relative min-w-[260px]"
-        >
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            placeholder="Buscar nos arquivos ou texto..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3.5 py-2 bg-[#0A0E1A] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
-          />
-        </form>
+        {/* Input de Busca & Alternador de Visualização */}
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              fetchFiles();
+            }}
+            className="relative flex-1 md:w-64"
+          >
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Buscar nos arquivos..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3.5 py-2 bg-[#0A0E1A] border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors"
+            />
+          </form>
+
+          {/* Alternador Grade / Lista */}
+          <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800 shrink-0">
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === "grid"
+                  ? "bg-cyan-500/20 text-cyan-300 shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+              title="Visualização em Grade"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`p-1.5 rounded-lg transition-colors ${
+                viewMode === "list"
+                  ? "bg-cyan-500/20 text-cyan-300 shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+              title="Visualização em Lista"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Lista de Arquivos */}
-      {loading ? (
-        <div className="p-16 rounded-2xl bg-[#0A0E1A] border border-slate-800 flex flex-col items-center justify-center space-y-3">
-          <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
-          <span className="text-xs text-slate-400">Carregando arquivos do workspace...</span>
-        </div>
-      ) : files.length === 0 ? (
-        <div className="p-16 rounded-2xl bg-[#0A0E1A] border border-dashed border-slate-800 flex flex-col items-center justify-center text-center space-y-4">
-          <UploadCloud className="w-12 h-12 text-slate-700" />
-          <div className="max-w-md">
-            <h3 className="text-sm font-bold text-white mb-1">Nenhum arquivo encontrado</h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Arraste arquivos para esta página ou clique no botão <strong>Upload de Arquivos</strong> acima para iniciar.
-            </p>
+      {/* Container com Drag & Drop */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`relative transition-all rounded-2xl ${
+          isDragging ? "ring-2 ring-cyan-400 ring-dashed bg-cyan-950/20 p-4" : ""
+        }`}
+      >
+        {isDragging && (
+          <div className="absolute inset-0 z-30 bg-cyan-950/80 backdrop-blur-sm border-2 border-dashed border-cyan-400 rounded-2xl flex flex-col items-center justify-center pointer-events-none animate-fadeIn">
+            <UploadCloud className="w-12 h-12 text-cyan-300 animate-bounce mb-2" />
+            <p className="text-sm font-bold text-white">Solte os arquivos para fazer upload instantâneo!</p>
+            <p className="text-xs text-cyan-300 mt-1">PDF, DOCX, XLSX, CSV, PPTX, Imagens ou ZIP</p>
           </div>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-bold text-xs shadow-neon-glow"
-          >
-            Fazer Primeiro Upload
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="p-4 rounded-2xl bg-[#0A0E1A] border border-slate-800 hover:border-cyan-500/40 transition-all flex flex-col justify-between group shadow-lg"
-            >
-              <div>
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 group-hover:border-cyan-500/30 transition-colors">
-                    {getFileIcon(file)}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {file.isGenerated && (
-                      <span className="px-2 py-0.5 rounded-md bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[10px] font-bold">
-                        IA
-                      </span>
-                    )}
-                    <span className="px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 text-[10px] font-mono border border-slate-800">
-                      {formatBytes(file.sizeBytes)}
-                    </span>
-                  </div>
-                </div>
+        )}
 
-                <h3 className="text-xs font-bold text-white truncate max-w-full group-hover:text-cyan-300 transition-colors" title={file.name}>
-                  {file.name}
-                </h3>
-                <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5 font-mono">
-                  <span>{new Date(file.createdAt).toLocaleDateString("pt-BR")}</span>
-                  <span>•</span>
-                  <span>{file.category}</span>
-                </div>
-              </div>
-
-              {/* Ações do Card */}
-              <div className="pt-4 mt-4 border-t border-slate-800/80 flex items-center justify-between gap-1">
-                <button
-                  onClick={() => handleOpenPreview(file)}
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                  Preview
-                </button>
-
-                <div className="flex items-center gap-1">
-                  <Link
-                    href={`/dashboard/chat?fileId=${file.id}&fileName=${encodeURIComponent(file.name)}`}
-                    className="p-1.5 rounded-lg bg-slate-900 hover:bg-cyan-950 text-slate-400 hover:text-cyan-300 transition-colors"
-                    title="Conversar sobre este arquivo"
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                  </Link>
-
-                  <a
-                    href={`/api/workspace/files/${file.id}/download`}
-                    download
-                    className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 transition-colors"
-                    title="Baixar arquivo"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                  </a>
-
-                  <button
-                    onClick={() => handleDeleteFile(file.id)}
-                    className="p-1.5 rounded-lg bg-slate-900 hover:bg-red-950/40 text-slate-500 hover:text-red-400 transition-colors"
-                    title="Excluir"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+        {/* Lista de Arquivos */}
+        {loading ? (
+          viewMode === "grid" ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <CardSkeleton count={6} />
             </div>
-          ))}
-        </div>
-      )}
+          ) : (
+            <TableSkeleton rows={6} cols={5} />
+          )
+        ) : files.length === 0 ? (
+          <div className="p-16 rounded-2xl bg-[#0A0E1A] border border-dashed border-slate-800 flex flex-col items-center justify-center text-center space-y-4">
+            <UploadCloud className="w-12 h-12 text-slate-700" />
+            <div className="max-w-md">
+              <h3 className="text-sm font-bold text-white mb-1">Nenhum arquivo encontrado</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Arraste arquivos para esta página ou clique no botão <strong>Upload de Arquivos</strong> acima para iniciar.
+              </p>
+            </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-bold text-xs shadow-neon-glow"
+            >
+              Fazer Primeiro Upload
+            </button>
+          </div>
+        ) : viewMode === "grid" ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {files.map((file) => (
+              <div
+                key={file.id}
+                className="p-4 rounded-2xl bg-[#0A0E1A] border border-slate-800 hover:border-cyan-500/40 transition-all flex flex-col justify-between group shadow-lg"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 group-hover:border-cyan-500/30 transition-colors">
+                      {getFileIcon(file)}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {file.isGenerated && (
+                        <span className="px-2 py-0.5 rounded-md bg-purple-950/80 border border-purple-500/40 text-purple-300 text-[10px] font-bold">
+                          IA
+                        </span>
+                      )}
+                      <span className="px-2 py-0.5 rounded-md bg-slate-900 text-slate-400 text-[10px] font-mono border border-slate-800">
+                        {formatBytes(file.sizeBytes)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <h3 className="text-xs font-bold text-white truncate max-w-full group-hover:text-cyan-300 transition-colors" title={file.name}>
+                    {file.name}
+                  </h3>
+                  <div className="text-[10px] text-slate-500 mt-1 flex items-center gap-1.5 font-mono">
+                    <span>{new Date(file.createdAt).toLocaleDateString("pt-BR")}</span>
+                    <span>•</span>
+                    <span>{file.category}</span>
+                  </div>
+                </div>
+
+                {/* Ações do Card */}
+                <div className="pt-4 mt-4 border-t border-slate-800/80 flex items-center justify-between gap-1">
+                  <button
+                    onClick={() => handleOpenPreview(file)}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                    Preview
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    <Link
+                      href={`/dashboard/chat?fileId=${file.id}&fileName=${encodeURIComponent(file.name)}`}
+                      className="p-1.5 rounded-lg bg-slate-900 hover:bg-cyan-950 text-slate-400 hover:text-cyan-300 transition-colors"
+                      title="Conversar sobre este arquivo"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                    </Link>
+
+                    <a
+                      href={`/api/workspace/files/${file.id}/download`}
+                      download
+                      className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 transition-colors"
+                      title="Baixar arquivo"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </a>
+
+                    <button
+                      onClick={() => handleDeleteFile(file.id)}
+                      className="p-1.5 rounded-lg bg-slate-900 hover:bg-red-950/40 text-slate-500 hover:text-red-400 transition-colors"
+                      title="Excluir"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          /* Visualização em Lista / Tabela */
+          <div className="rounded-2xl bg-[#0A0E1A] border border-slate-800 overflow-hidden shadow-lg">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-900/80 text-slate-400 border-b border-slate-800 font-mono">
+                <tr>
+                  <th className="py-3 px-4">Arquivo</th>
+                  <th className="py-3 px-4 hidden sm:table-cell">Categoria</th>
+                  <th className="py-3 px-4">Tamanho</th>
+                  <th className="py-3 px-4 hidden md:table-cell">Data</th>
+                  <th className="py-3 px-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                {files.map((file) => (
+                  <tr key={file.id} className="hover:bg-slate-900/50 transition-colors">
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-1.5 rounded-lg bg-slate-900 text-cyan-400 shrink-0">
+                          {getFileIcon(file)}
+                        </div>
+                        <span className="font-bold text-white truncate max-w-[200px] sm:max-w-xs" title={file.name}>
+                          {file.name}
+                        </span>
+                        {file.isGenerated && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 font-mono text-[9px]">
+                            IA
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4 hidden sm:table-cell text-slate-400 font-mono text-[11px]">
+                      {file.category}
+                    </td>
+                    <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
+                      {formatBytes(file.sizeBytes)}
+                    </td>
+                    <td className="py-3 px-4 hidden md:table-cell text-slate-500 font-mono text-[11px]">
+                      {new Date(file.createdAt).toLocaleDateString("pt-BR")}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleOpenPreview(file)}
+                          className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 transition-colors"
+                          title="Preview"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <Link
+                          href={`/dashboard/chat?fileId=${file.id}&fileName=${encodeURIComponent(file.name)}`}
+                          className="p-1.5 rounded-lg bg-slate-900 hover:bg-cyan-950 text-slate-400 hover:text-cyan-300 transition-colors"
+                          title="Conversar com a IA"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </Link>
+                        <a
+                          href={`/api/workspace/files/${file.id}/download`}
+                          download
+                          className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 transition-colors"
+                          title="Download"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </a>
+                        <button
+                          onClick={() => handleDeleteFile(file.id)}
+                          className="p-1.5 rounded-lg bg-slate-900 hover:bg-red-950/40 text-slate-500 hover:text-red-400 transition-colors"
+                          title="Excluir"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* MODAL DE PREVIEW INTERATIVO */}
       {previewFile && (

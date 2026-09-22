@@ -26,7 +26,10 @@ import {
   Plus,
   Trash2,
   Lock,
+  Search,
 } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
+import { ProcessingIndicator } from "@/components/ui/processing-indicator";
 import { OFFICIAL_AGENTS, AgentTool } from "@/lib/agents-hub";
 
 interface AgentUI {
@@ -54,6 +57,9 @@ interface AgentUI {
 export default function AgentsHubPage() {
   const [agents, setAgents] = useState<AgentUI[]>(OFFICIAL_AGENTS as any);
   const [selectedAgent, setSelectedAgent] = useState<AgentUI | null>(null);
+  const toast = useToast();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("ALL");
 
   // Tool Modal
   const [activeTool, setActiveTool] = useState<AgentTool | null>(null);
@@ -116,9 +122,13 @@ export default function AgentsHubPage() {
       const data = await res.json();
       if (data.success && data.result) {
         setToolResult(data.result);
+        toast.success("Ferramenta concluída!", `A ferramenta "${activeTool.name}" gerou o resultado com sucesso.`);
+      } else {
+        toast.error("Erro na ferramenta", data.error || "Não foi possível executar a ferramenta.");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      toast.error("Falha de conexão", e?.message || "Erro ao executar ferramenta.");
     } finally {
       setExecutingTool(false);
     }
@@ -160,10 +170,14 @@ export default function AgentsHubPage() {
       if (res.ok) {
         setNewMemoryKey("");
         setNewMemoryValue("");
+        toast.success("Memória salva!", "O agente gravou este fato com sucesso.");
         handleOpenMemoryModal(memoryModalAgent);
+      } else {
+        toast.error("Erro ao salvar", "Não foi possível gravar a memória.");
       }
     } catch (err) {
       console.error(err);
+      toast.error("Falha na requisição", "Erro de conexão ao salvar memória.");
     }
   };
 
@@ -176,6 +190,7 @@ export default function AgentsHubPage() {
       });
       if (res.ok) {
         setMemories((prev) => prev.filter((m) => m.id !== memoryId));
+        toast.info("Memória removida", "O fragmento foi apagado do agente.");
       }
     } catch (err) {
       console.error(err);
@@ -239,9 +254,66 @@ export default function AgentsHubPage() {
         </Link>
       </div>
 
+      {/* Filtros e Busca de Agentes */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full pb-1 sm:pb-0 scrollbar-none">
+          {[
+            { id: "ALL", label: "Todos os Agentes" },
+            { id: "ENG", label: "💻 Engenharia" },
+            { id: "DESIGN", label: "🎨 Design & UI/UX" },
+            { id: "MKT", label: "📢 Marketing & Copy" },
+            { id: "EDU", label: "🎓 Educação" },
+            { id: "BIZ", label: "💼 Negócios" },
+            { id: "DATA", label: "📊 Dados & BI" },
+          ].map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setCategoryFilter(cat.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                categoryFilter === cat.id
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                  : "bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800"
+              }`}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative w-full sm:w-64 shrink-0">
+          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3.5 top-3" />
+          <input
+            type="text"
+            placeholder="Buscar especialista..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-colors"
+          />
+        </div>
+      </div>
+
       {/* Grid com os Agentes */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {agents.map((agent) => {
+        {agents
+          .filter((ag) => {
+            const matchesSearch =
+              !searchQuery.trim() ||
+              ag.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              ag.role.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              ag.description.toLowerCase().includes(searchQuery.toLowerCase());
+
+            const matchesCategory =
+              categoryFilter === "ALL" ||
+              (categoryFilter === "ENG" && (ag.slug.includes("dev") || ag.category === "DEVELOPMENT")) ||
+              (categoryFilter === "DESIGN" && (ag.slug.includes("design") || ag.category === "DESIGN")) ||
+              (categoryFilter === "MKT" && (ag.slug.includes("marketing") || ag.slug.includes("fable") || ag.category === "MARKETING")) ||
+              (categoryFilter === "EDU" && (ag.slug.includes("edu") || ag.slug.includes("estudos") || ag.category === "EDUCATION")) ||
+              (categoryFilter === "BIZ" && (ag.slug.includes("business") || ag.slug.includes("juridico") || ag.category === "BUSINESS")) ||
+              (categoryFilter === "DATA" && (ag.slug.includes("analyst") || ag.slug.includes("research") || ag.category === "ANALYTICS"));
+
+            return matchesSearch && matchesCategory;
+          })
+          .map((agent) => {
           const IconComp = getAgentIcon(agent.iconName);
           const isLocked = agent.hasPermission === false;
 
@@ -409,6 +481,15 @@ export default function AgentsHubPage() {
               >
                 {executingTool ? "Processando Ferramenta..." : activeTool.actionLabel || "Executar Ferramenta"}
               </button>
+
+              {executingTool && (
+                <div className="py-2 animate-fadeIn">
+                  <ProcessingIndicator
+                    modelName={selectedAgent?.name || "ORVEXA AGENT"}
+                    currentStep={`Executando ferramenta ${activeTool?.name}...`}
+                  />
+                </div>
+              )}
 
               {toolResult && (
                 <div className="pt-4 border-t border-slate-800 space-y-2">

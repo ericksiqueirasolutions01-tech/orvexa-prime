@@ -43,6 +43,7 @@ import {
   Wrench,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { ProcessingIndicator } from "@/components/ui/processing-indicator";
 
 interface ChatMessage {
   id: string;
@@ -1132,9 +1133,30 @@ function ChatContent() {
       </div>
 
       {errorBanner && (
-        <div className="p-3 bg-red-950/80 border-b border-red-500/30 text-red-300 text-xs flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-          <span>{errorBanner}</span>
+        <div className="p-3.5 bg-red-950/90 border-b border-red-500/40 text-red-200 text-xs flex items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span className="font-medium truncate">{errorBanner}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setErrorBanner(null);
+                handleSendMessage();
+              }}
+              className="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 font-bold text-[11px] transition-colors border border-red-500/30"
+            >
+              Tentar Novamente
+            </button>
+            <button
+              type="button"
+              onClick={() => setErrorBanner(null)}
+              className="p-1 text-red-400 hover:text-white rounded transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1241,10 +1263,12 @@ function ChatContent() {
                       return <span key={pIdx}>{part}</span>;
                     })
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 text-cyan-400 animate-pulse">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Gerando resposta via AI Gateway...
-                    </span>
+                    <div className="py-2 max-w-sm">
+                      <ProcessingIndicator
+                        modelName={activeAgentObj ? activeAgentObj.name : activeModelObj.name}
+                        currentStep="Sintetizando resposta no Gateway Multi-IA..."
+                      />
+                    </div>
                   )}
                 </div>
 

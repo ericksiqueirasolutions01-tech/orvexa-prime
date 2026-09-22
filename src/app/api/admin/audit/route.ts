@@ -85,3 +85,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Falha ao registrar auditoria." }, { status: 500 });
   }
 }
+
