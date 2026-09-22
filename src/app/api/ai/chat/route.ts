@@ -8,6 +8,7 @@ import { retrieveUnifiedMemoryContext } from "@/ai/memory/semantic-search";
 import { extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 import { indexConversation } from "@/ai/memory/conversation-indexer";
 import { checkUserTokenQuota, checkModelAccess } from "@/lib/plan-limits";
+import { assertCanSendMessage, assertCanUseAgent } from "@/lib/consumption";
 
 export async function POST(req: Request) {
   try {
@@ -44,6 +45,20 @@ export async function POST(req: Request) {
           error: `Limite de tokens do seu plano (${quotaStatus.planName}) atingido neste ciclo (${quotaStatus.usedTokens.toLocaleString()} / ${quotaStatus.maxTokens.toLocaleString()}). Faça upgrade para continuar utilizando IA.`,
           quotaExceeded: true,
           quotaStatus,
+        },
+        { status: 403 }
+      );
+    }
+
+    // 1.1 Verificação de Quota de Mensagens do Plano (FREE: 100, PRO: 1500, BUSINESS: 6000, ENTERPRISE: 50000)
+    const messageGuard = await assertCanSendMessage(session.id);
+    if (!messageGuard.allowed) {
+      return NextResponse.json(
+        {
+          error: messageGuard.reason,
+          quotaExceeded: true,
+          planUpgradeRequired: true,
+          usage: messageGuard.usage,
         },
         { status: 403 }
       );
@@ -108,6 +123,17 @@ export async function POST(req: Request) {
           (allowedRoles.includes(session.role) &&
             (allowedPlans.includes("ALL") || allowedPlans.includes(planSlug))) ||
           session.role === "ADMIN";
+
+        const agentGuard = await assertCanUseAgent(session.id, agent.slug);
+        if (!agentGuard.allowed) {
+          return NextResponse.json(
+            {
+              error: agentGuard.reason,
+              planUpgradeRequired: true,
+            },
+            { status: 403 }
+          );
+        }
 
         if (!hasAccess) {
           return NextResponse.json(

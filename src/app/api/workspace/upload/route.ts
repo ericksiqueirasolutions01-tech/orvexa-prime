@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { extractTextFromFileBuffer } from "@/ai/tools/files";
 import { categorizeFileName } from "@/ai/tools/file-generator";
 import { checkUserStorageQuota } from "@/lib/plan-limits";
+import { assertCanUploadFile } from "@/lib/consumption";
 
 export const runtime = "nodejs";
 
@@ -38,10 +39,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nenhum arquivo válido foi enviado." }, { status: 400 });
     }
 
-    // 1. Verificação Centralizada de Quota de Armazenamento do Usuário
+    // 1. Verificação Centralizada de Quota de Armazenamento e Quantidade de Arquivos
     const incomingBytes = files.reduce((acc, f) => acc + f.size, 0);
-    const storageCheck = await checkUserStorageQuota(session.id, incomingBytes);
 
+    const fileGuard = await assertCanUploadFile(session.id, incomingBytes);
+    if (!fileGuard.allowed) {
+      return NextResponse.json(
+        {
+          error: fileGuard.reason,
+          quotaExceeded: true,
+          planUpgradeRequired: true,
+        },
+        { status: 403 }
+      );
+    }
+
+    const storageCheck = await checkUserStorageQuota(session.id, incomingBytes);
     if (!storageCheck.hasStorage && session.role !== "ADMIN") {
       const quotaMb = (storageCheck.maxBytes / (1024 * 1024)).toFixed(0);
       const usedMb = (storageCheck.usedBytes / (1024 * 1024)).toFixed(1);

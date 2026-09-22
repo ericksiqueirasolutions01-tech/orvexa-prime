@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditEvent, verifyWebhookSignature } from "@/lib/security";
+import { PaymentService } from "@/lib/payment-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -81,72 +82,26 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 1. Atualiza status do usuário no banco para ACTIVE
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { status: "ACTIVE" },
-      include: { plan: true },
-    });
-
-    // 2. Atualiza assinatura e período de vigência
-    let subId = subscriptionId;
-    if (!subId) {
-      const userSub = await prisma.subscription.findFirst({
-        where: { userId: user.id },
-        orderBy: { createdAt: "desc" },
-      });
-      if (userSub) subId = userSub.id;
-    }
-
-    const nextMonth = new Date();
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
-
-    if (subId) {
-      await prisma.subscription.update({
-        where: { id: subId },
-        data: {
-          status: "ACTIVE",
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: nextMonth,
-        },
-      });
-    }
-
-    // 3. Registra pagamento confirmado
-    await prisma.payment.create({
-      data: {
-        userId: user.id,
-        subscriptionId: subId || null,
-        amountCents: amountCents || user.plan?.priceCents || 11990,
-        currency: "BRL",
-        status: "CONFIRMED",
-        gateway,
-        transactionId,
-      },
-    });
-
-    // 4. Registra auditoria de segurança
-    await logAuditEvent({
-      actorId: user.id,
-      action: "PAYMENT_CONFIRMED_VIA_WEBHOOK",
-      resourceType: "PAYMENT",
-      resourceId: transactionId,
-      details: {
-        userId: user.id,
-        email: user.email,
-        plan: user.plan?.name,
-        amountCents,
-        gateway,
-        eventType,
-      },
+    // 1. Processa ativação e renovação via PaymentService
+    const planSlug = payload.planSlug || "pro";
+    const activation = await PaymentService.confirmPaymentAndActivate({
+      gateway: gateway as any,
+      transactionId,
+      status: "CONFIRMED",
+      userId,
+      planSlug,
+      amountCents: amountCents || 7990,
+      eventType: eventType || "payment.confirmed",
+      rawPayload: payload,
     });
 
     return NextResponse.json({
       success: true,
       approved: true,
-      message: `Usuário ${user.email} ativado com sucesso para o status ACTIVE via Webhook!`,
-      userStatus: "ACTIVE",
-      planName: user.plan?.name || "START",
+      message: `Usuário ${activation.user.email} ativado com sucesso para o status ACTIVE no plano ${activation.plan.name} via Webhook!`,
+      userStatus: activation.user.status,
+      planName: activation.plan.name,
+      subscriptionId: activation.subscription.id,
     });
   } catch (error: any) {
     console.error("[Payment Webhook Error]:", error);

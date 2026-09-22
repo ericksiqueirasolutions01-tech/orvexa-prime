@@ -5,6 +5,7 @@ import { getHealthyApiKeys, markKeySuccess } from "@/lib/ai-gateway";
 import { decryptApiKey } from "@/lib/crypto";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { buildProfessionalPrompt } from "@/lib/prompt-engine";
+import { assertCanGenerateImage } from "@/lib/consumption";
 
 export async function POST(req: Request) {
   const session = await getCurrentUser();
@@ -47,7 +48,21 @@ export async function POST(req: Request) {
 
     const IMAGE_TOKEN_COST = 2000;
 
-    // 1. Verificação de Quota de Tokens do Usuário (se não for ADMIN)
+    // 1. Verificação de Quota de Gerações de Imagem do Plano (FREE: 10, PRO: 80, BUSINESS: 300, ENTERPRISE: 1500)
+    const imageGuard = await assertCanGenerateImage(session.id);
+    if (!imageGuard.allowed) {
+      return NextResponse.json(
+        {
+          error: imageGuard.reason,
+          quotaExceeded: true,
+          planUpgradeRequired: true,
+          usage: imageGuard.usage,
+        },
+        { status: 403 }
+      );
+    }
+
+    // 1.1 Verificação de Quota de Tokens do Usuário (se não for ADMIN)
     if (session.role !== "ADMIN") {
       const user = await prisma.user.findUnique({
         where: { id: session.id },

@@ -85,27 +85,45 @@ async function main() {
   }
   console.log("✓ Modelos de IA criados:", Object.keys(models).join(", "));
 
-  // 3. Criar Planos de Assinatura
+  // 3. Criar Planos de Assinatura Oficiais: FREE, PRO, BUSINESS, ENTERPRISE
   const plansData = [
     {
-      name: "START",
-      slug: "start",
-      priceCents: 4990, // R$ 49,90
-      monthlyTokens: 200000,
-      allowedModels: JSON.stringify(["gpt-4o-mini", "claude-3-haiku", "gemini-1.5-flash"]),
+      name: "FREE",
+      slug: "free",
+      priceCents: 0, // R$ 0,00
+      monthlyTokens: 100000,
+      monthlyMessages: 100,
+      monthlyFiles: 5,
+      monthlyImages: 10,
+      allowedAgents: JSON.stringify(["orvexa-dev"]),
+      allowedModels: JSON.stringify(["gpt-4o-mini", "gemini-1.5-flash"]),
       maxSeats: 1,
+      storageQuotaBytes: 104857600, // 100 MB
       features: JSON.stringify([
-        "200.000 Tokens Mensais",
-        "Acesso aos modelos rápidos (GPT-4o Mini, Haiku, Flash)",
-        "Histórico de conversas por 30 dias",
-        "Suporte Comunitário",
+        "100 mensagens mensais",
+        "5 arquivos processados",
+        "10 gerações de imagem",
+        "Agente Especialista Dev (Básico)",
+        "100 MB de armazenamento em nuvem",
+        "Modelos rápidos de alta eficiência",
       ]),
     },
     {
       name: "PRO",
       slug: "pro",
-      priceCents: 11990, // R$ 119,90
-      monthlyTokens: 1000000,
+      priceCents: 7990, // R$ 79,90
+      monthlyTokens: 1500000,
+      monthlyMessages: 1500,
+      monthlyFiles: 60,
+      monthlyImages: 80,
+      allowedAgents: JSON.stringify([
+        "orvexa-dev",
+        "orvexa-design",
+        "orvexa-marketing",
+        "orvexa-edu",
+        "orvexa-business",
+        "orvexa-analyst",
+      ]),
       allowedModels: JSON.stringify([
         "gpt-4o",
         "claude-3-5-sonnet-20241022",
@@ -115,44 +133,59 @@ async function main() {
         "gemini-1.5-flash",
       ]),
       maxSeats: 1,
+      storageQuotaBytes: 5368709120, // 5 GB
       features: JSON.stringify([
-        "1.000.000 Tokens Mensais",
-        "Acesso a TODOS os Modelos Top-Tier (Claude 3.5, GPT-4o, Gemini 1.5 Pro)",
-        "ORVEXA PRIME ENGINE Inteligente",
-        "4 Agentes Nativos Especialistas",
-        "Upload de Arquivos (PDF, DOCX, Imagens)",
+        "1.500 mensagens mensais",
+        "60 arquivos com chunking & RAG",
+        "80 gerações de imagem HD",
+        "Todos os 6 Agentes Oficiais",
+        "5 GB de armazenamento seguro",
+        "Modelos Top-Tier (Claude 3.5 Sonnet & GPT-4o)",
       ]),
     },
     {
-      name: "PREMIUM",
-      slug: "premium",
+      name: "BUSINESS",
+      slug: "business",
       priceCents: 24990, // R$ 249,90
-      monthlyTokens: 3000000,
+      monthlyTokens: 5000000,
+      monthlyMessages: 6000,
+      monthlyFiles: 300,
+      monthlyImages: 300,
+      allowedAgents: JSON.stringify(["ALL"]),
       allowedModels: JSON.stringify(["ALL"]),
-      maxSeats: 3,
+      maxSeats: 5,
+      storageQuotaBytes: 26843545600, // 25 GB
       features: JSON.stringify([
-        "3.000.000 Tokens Mensais",
-        "Prioridade Máxima no AI Gateway Failover",
-        "Até 3 membros na conta",
-        "Upload de arquivos pesados e planilhas",
-        "Criação de Agentes Customizados",
-        "Suporte Prioritário VIP 24/7",
+        "6.000 mensagens mensais",
+        "300 arquivos corporativos",
+        "300 imagens ultra HD",
+        "Todos os Agentes + Agentes Customizados",
+        "25 GB de armazenamento em nuvem",
+        "Prioridade no AI Gateway Failover",
+        "Até 5 membros da equipe",
       ]),
     },
     {
-      name: "EMPRESA",
-      slug: "empresa",
-      priceCents: 59990, // R$ 599,90
-      monthlyTokens: 10000000,
+      name: "ENTERPRISE",
+      slug: "enterprise",
+      priceCents: 79990, // R$ 799,90
+      monthlyTokens: 20000000,
+      monthlyMessages: 50000,
+      monthlyFiles: 2000,
+      monthlyImages: 1500,
+      allowedAgents: JSON.stringify(["ALL"]),
       allowedModels: JSON.stringify(["ALL"]),
-      maxSeats: 10,
+      maxSeats: 25,
+      storageQuotaBytes: 107374182400, // 100 GB
       features: JSON.stringify([
-        "10.000.000 Tokens Mensais",
-        "Até 10 membros da equipe",
-        "AI Gateway Dedicado com Chaves Exclusivas",
-        "Relatórios de Auditoria e Conformidade LGPD",
-        "SLA Garantido 99.9%",
-        "Gerente de Conta Dedicado",
+        "Mensagens ilimitadas (50.000 quota base)",
+        "2.000 arquivos processados",
+        "1.500 gerações de imagem 4K",
+        "Agentes dedicados com memória ilimitada",
+        "100 GB de armazenamento corporativo",
+        "Chaves de API dedicadas no Gateway",
+        "SLA 99.9% e Relatórios LGPD/SOC2",
+        "Gerente de conta exclusivo 24/7",
       ]),
     },
   ];

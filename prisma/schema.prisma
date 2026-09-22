@@ -39,21 +39,25 @@ model User {
 }
 
 model Plan {
-  id             String         @id @default(uuid())
-  name           String         // START, PRO, PREMIUM, EMPRESA
-  slug           String         @unique
-  priceCents     Int            // in cents (ex: 4990 = R$ 49,90)
-  monthlyTokens  Int            // Monthly token quota
-  allowedModels  String         // JSON array of allowed model slugs
-  maxSeats       Int            @default(1)
-  storageQuotaBytes Int         @default(524288000) // 500 MB default storage quota
-  features       String         // JSON array of features description
-  isActive       Boolean        @default(true)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id                String         @id @default(uuid())
+  name              String         // FREE, PRO, BUSINESS, ENTERPRISE
+  slug              String         @unique
+  priceCents        Int            // in cents (ex: 7990 = R$ 79,90)
+  monthlyTokens     Int            @default(100000) // Monthly token quota
+  monthlyMessages   Int            @default(100)    // Mensagens mensais
+  monthlyFiles      Int            @default(5)      // Arquivos processados no ciclo
+  monthlyImages     Int            @default(10)     // Gerações de imagem no ciclo
+  allowedAgents     String         @default("[\"ALL\"]") // JSON array de slugs de agentes autorizados
+  allowedModels     String         // JSON array of allowed model slugs
+  maxSeats          Int            @default(1)
+  storageQuotaBytes Float        @default(524288000) // Limite de armazenamento em bytes (Float suporta até 9 Petabytes)
+  features          String         // JSON array of features description
+  isActive          Boolean        @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
-  users          User[]
-  subscriptions  Subscription[]
+  users             User[]
+  subscriptions     Subscription[]
 }
 
 model Subscription {
