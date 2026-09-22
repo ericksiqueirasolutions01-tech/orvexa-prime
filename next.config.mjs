@@ -4,8 +4,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  outputFileTracingIncludes: {
-    '/**': ['./prisma/dev.db'],
+  experimental: {
+    outputFileTracingIncludes: {
+      '/**': ['./prisma/dev.db'],
+    },
   },
 };
 

@@ -42,9 +42,9 @@ export default function ImageStudioPage() {
 
   // Editor / Canvas State
   const [priceTag, setPriceTag] = useState("R$ 12,99");
-  const [showPriceTag, setShowPriceTag] = useState(true);
+  const [showPriceTag, setShowPriceTag] = useState(false);
   const [promoBadge, setPromoBadge] = useState("OFERTA ESPECIAL");
-  const [showPromoBadge, setShowPromoBadge] = useState(true);
+  const [showPromoBadge, setShowPromoBadge] = useState(false);
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
   const [saturate, setSaturate] = useState(100);
@@ -267,6 +267,13 @@ export default function ImageStudioPage() {
                   <Wand2 className={`w-4 h-4 ${generating ? "animate-spin" : ""}`} />
                   {generating ? "Gerando Imagem Ultra HD..." : "Gerar Imagem Agora"}
                 </button>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                  <Check className="w-3.5 h-3.5" /> Sem cobrança em dinheiro (R$ 0,00)
+                </span>
+                <span className="text-cyan-400 font-mono text-[10px]">Utiliza 2.000 tokens da sua cota mensal</span>
               </div>
 
               {/* Configurações Rápidas */}

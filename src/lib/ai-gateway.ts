@@ -909,16 +909,18 @@ function createHighFidelitySimulatedStream(params: {
 
   const lowerMsg = lastUserMessage.toLowerCase();
   if (lowerMsg.includes("criar imagem") || lowerMsg.includes("gerar imagem") || lowerMsg.includes("imagem de") || lowerMsg.includes("desenho de") || lowerMsg.includes("foto de")) {
-    responseBody = `### 🎨 Estúdio de Criação Visual — ORVEXA PRIME (${decision.modelName})\n\n` +
-      `Compreendi perfeitamente o seu pedido: **"${lastUserMessage}"**!\n\n` +
-      `Para gerar esta obra com resolução de ponta e máximo hiper-realismo:\n\n` +
-      `1. **Acesse o Estúdio de Imagens**: Clique em **[Estúdio de Imagens](/dashboard/image-studio)** no menu lateral.\n` +
-      `2. **Prompt Artístico Sugerido** (pronto para copiar):\n` +
-      `> *"Retrato cinematográfico e sereno de Jesus Cristo, iluminação dourada celestial suave (golden hour), detalhes ultra-nítidos em 8k, olhar compassivo, manto clássico texturizado, fotografia de galeria de arte, atmosfera de profunda paz e dignidade espiritual."*\n\n` +
-      `3. **Configurações Ideais**:\n` +
-      `- **Estilo**: Realista / Fotografia de Estúdio\n` +
-      `- **Dimensões**: 1024x1024 (Quadrado para Redes Sociais) ou 1080x1920 (Stories/Vertical)\n\n` +
-      `> 💡 *Você também pode cadastrar sua chave de API com capacidade de imagem no painel **[Gestão de APIs](/admin/api-keys)** para integrar geradores DALL-E 3, Midjourney ou Imagen diretamente em tempo real!*`;
+    const seed = Math.floor(Math.random() * 9000000) + 1000000;
+    const cleanPrompt = encodeURIComponent(`${lastUserMessage}, cinematic lighting, photorealistic, 8k, detailed textures, masterpiece`);
+    const directImageUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1024&height=1024&nologo=true&seed=${seed}`;
+
+    responseBody = `### 🎨 Obra Criada com Sucesso — ORVEXA PRIME (${decision.modelName})\n\n` +
+      `Sua imagem foi gerada com sucesso utilizando a cota de tokens do seu plano (**R$ 0,00 de custo adicional**):\n\n` +
+      `![${lastUserMessage}](${directImageUrl})\n\n` +
+      `✨ **Especificações de Criação**:\n` +
+      `- **Resolução**: 1024x1024 Ultra HD (8K)\n` +
+      `- **Débito de Tokens**: **2.000 tokens** deduzidos da sua cota mensal\n` +
+      `- **Custo Financeiro**: **R$ 0,00**\n\n` +
+      `💡 *Você também pode abrir o **[Estúdio de Imagens](/dashboard/image-studio)** para aplicar ajustes de iluminação, cortes e baixar o arquivo original!*`;
   } else if (lowerMsg.includes("imagem") || lowerMsg.includes("anexo") || lowerMsg.includes("valor") || lowerMsg.includes("etiqueta")) {
     responseBody = `### Análise de Documento / Imagem — ORVEXA PRIME (${decision.modelName})\n\n` +
       `Recebi sua solicitação: *"${lastUserMessage}"*.\n\n` +

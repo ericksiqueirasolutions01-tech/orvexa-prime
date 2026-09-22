@@ -1064,9 +1064,28 @@ function ChatContent() {
                 </div>
               )}
 
-              {/* Mensagem Formatada */}
-              <div className="whitespace-pre-wrap font-sans break-words">
-                {msg.content || (
+              {/* Mensagem Formatada com Suporte a Imagens Geradas */}
+              <div className="whitespace-pre-wrap font-sans break-words space-y-3">
+                {msg.content ? (
+                  msg.content.split(/(!\[.*?\]\(https?:\/\/.*?\))/g).map((part, pIdx) => {
+                    const imgMatch = part.match(/!\[(.*?)\]\((https?:\/\/.*?)\)/);
+                    if (imgMatch) {
+                      const [, alt, src] = imgMatch;
+                      return (
+                        <div key={pIdx} className="my-3 rounded-2xl overflow-hidden border border-cyan-500/40 shadow-neon-glow max-w-md bg-slate-950">
+                          <img src={src} alt={alt || "Imagem Gerada"} className="w-full h-auto object-cover max-h-96" />
+                          <div className="p-2.5 bg-slate-950 text-[11px] text-cyan-300 font-medium flex items-center justify-between border-t border-slate-800">
+                            <span>🎨 {alt || "Imagem Gerada por IA"}</span>
+                            <a href={src} target="_blank" rel="noreferrer" className="text-cyan-400 hover:text-cyan-300 font-bold underline">
+                              Abrir em Alta Resolução ↗
+                            </a>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return <span key={pIdx}>{part}</span>;
+                  })
+                ) : (
                   <span className="inline-flex items-center gap-1.5 text-cyan-400 animate-pulse">
                     <Sparkles className="w-3.5 h-3.5" />
                     Gerando resposta via AI Gateway...
