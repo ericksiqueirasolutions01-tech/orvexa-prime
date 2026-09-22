@@ -282,6 +282,25 @@ async function main() {
     },
   });
 
+  // Erick Siqueira (Admin Master)
+  const erickHash = await bcrypt.hash("M@nu2901", salt);
+  await prisma.user.upsert({
+    where: { email: "ericksiqueiraa@gmail.com" },
+    update: {
+      passwordHash: erickHash,
+      role: "ADMIN",
+      status: "ACTIVE",
+      name: "Erick Siqueira",
+    },
+    create: {
+      name: "Erick Siqueira",
+      email: "ericksiqueiraa@gmail.com",
+      passwordHash: erickHash,
+      role: "ADMIN",
+      status: "ACTIVE",
+    },
+  });
+
   // Cliente Ativo Demo com Plano PRO
   const clientPassword = "ClienteOrvexa2026!";
   const clientHash = await bcrypt.hash(clientPassword, salt);

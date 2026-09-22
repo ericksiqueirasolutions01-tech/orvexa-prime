@@ -9,3 +9,4 @@ execSync('npx prisma generate', { stdio: 'inherit', env: process.env });
 
 console.log('⚡ [ORVEXA BUILD] Compilando Next.js em modo produção...');
 execSync('npx next build', { stdio: 'inherit', env: process.env });
+
