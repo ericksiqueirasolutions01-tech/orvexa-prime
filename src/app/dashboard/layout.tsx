@@ -16,6 +16,7 @@ import {
   FileSpreadsheet,
   Globe,
   Bot,
+  FolderGit2,
 } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -49,6 +50,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navItems = [
     { label: "Visão Geral", href: "/dashboard", icon: LayoutDashboard },
     { label: "Chat Multi-IA", href: "/dashboard/chat", icon: MessageSquare },
+    { label: "ORVEXA Workspace", href: "/dashboard/workspace", icon: FolderGit2 },
     { label: "Site Builder", href: "/dashboard/site-builder", icon: Globe },
     { label: "Agentes Especialistas", href: "/dashboard/agents", icon: Bot },
     { label: "Image Studio", href: "/dashboard/image-studio", icon: ImageIcon },

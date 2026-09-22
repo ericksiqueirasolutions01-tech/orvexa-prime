@@ -9,6 +9,7 @@ export interface FileAnalysisResult {
   fileSizeBytes: number;
   extractedText: string;
   format: "PDF" | "DOCX" | "XLSX" | "CSV" | "PPTX" | "TXT" | "JSON" | "IMAGE" | "UNKNOWN";
+  previewData?: any;
   metrics?: {
     totalRows?: number;
     sheets?: string[];
@@ -40,6 +41,7 @@ export async function extractTextFromFileBuffer(
       const workbook = XLSX.read(buffer, { type: "buffer" });
       const sheetNames = workbook.SheetNames;
       const sheetsContent: string[] = [];
+      const tablePreviewSheets: any[] = [];
       let totalRows = 0;
 
       for (const sheetName of sheetNames) {
@@ -48,7 +50,16 @@ export async function extractTextFromFileBuffer(
         totalRows += rows.length;
 
         if (rows.length > 0) {
-          const previewRows = rows.slice(0, 150); // Até 150 linhas estruturadas
+          const headers = (rows[0] || []).map((h: any) => String(h || ""));
+          const sampleRows = rows.slice(1, 50); // Primeiras 50 linhas para preview interativo
+          tablePreviewSheets.push({
+            name: sheetName,
+            headers,
+            rows: sampleRows,
+            totalRows: rows.length - 1,
+          });
+
+          const previewRows = rows.slice(0, 150);
           const formatted = previewRows
             .map((r) => (Array.isArray(r) ? r.join(" | ") : JSON.stringify(r)))
             .join("\n");
@@ -63,6 +74,11 @@ export async function extractTextFromFileBuffer(
         fileSizeBytes: size,
         extractedText: extracted,
         format: lowerName.endsWith(".csv") ? "CSV" : "XLSX",
+        previewData: {
+          type: "SPREADSHEET",
+          sheets: tablePreviewSheets,
+          totalRows,
+        },
         metrics: {
           totalRows,
           sheets: sheetNames,
@@ -177,12 +193,19 @@ export async function extractTextFromFileBuffer(
       extracted = cleanAscii.length > 100 ? cleanAscii.substring(0, 40000) : `[Documento PDF: ${fileName} - Leitura estruturada ativa].`;
     }
 
+    const pdfBase64 = size <= 4 * 1024 * 1024 ? `data:application/pdf;base64,${buffer.toString("base64")}` : undefined;
+
     return {
       fileName,
       fileType: mimeType || "application/pdf",
       fileSizeBytes: size,
       extractedText: extracted,
       format: "PDF",
+      previewData: {
+        type: "PDF",
+        dataUrl: pdfBase64,
+        charCount: extracted.length,
+      },
       metrics: {
         charCount: extracted.length,
         wordCount: extracted.split(/\s+/).filter(Boolean).length,
@@ -196,17 +219,24 @@ export async function extractTextFromFileBuffer(
     lowerName.endsWith(".jpg") ||
     lowerName.endsWith(".jpeg") ||
     lowerName.endsWith(".webp") ||
+    lowerName.endsWith(".svg") ||
     mimeType?.includes("image")
   ) {
-    const base64Preview = buffer.slice(0, 500).toString("base64");
+    const imageMime = lowerName.endsWith(".png") ? "image/png" : lowerName.endsWith(".webp") ? "image/webp" : lowerName.endsWith(".svg") ? "image/svg+xml" : "image/jpeg";
+    const imageBase64 = size <= 6 * 1024 * 1024 ? `data:${mimeType || imageMime};base64,${buffer.toString("base64")}` : undefined;
+
     return {
       fileName,
-      fileType: mimeType || "image/jpeg",
+      fileType: mimeType || imageMime,
       fileSizeBytes: size,
       extractedText: `[Imagem Detectada: ${fileName} (${(size / 1024).toFixed(1)} KB)]. Motor de Visão e OCR Ativos.`,
       format: "IMAGE",
+      previewData: {
+        type: "IMAGE",
+        dataUrl: imageBase64,
+      },
       metrics: {
-        charCount: base64Preview.length,
+        charCount: imageBase64?.length || 0,
       },
     };
   }
@@ -219,5 +249,10 @@ export async function extractTextFromFileBuffer(
     fileSizeBytes: size,
     extractedText: genericText,
     format: "UNKNOWN",
+    previewData: {
+      type: "TEXT",
+      snippet: genericText.slice(0, 3000),
+    },
   };
 }
+

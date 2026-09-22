@@ -43,6 +43,7 @@ model Plan {
   monthlyTokens  Int            // Monthly token quota
   allowedModels  String         // JSON array of allowed model slugs
   maxSeats       Int            @default(1)
+  storageQuotaBytes Int         @default(524288000) // 500 MB default storage quota
   features       String         // JSON array of features description
   isActive       Boolean        @default(true)
   createdAt      DateTime       @default(now())
@@ -246,14 +247,20 @@ model File {
   storedPath     String
   fileSizeBytes  Int
   mimeType       String
+  category       String        @default("DOCUMENT") // DOCUMENT, SPREADSHEET, PRESENTATION, IMAGE, CODE, ARCHIVE
+  isGenerated    Boolean       @default(false)
+  previewData    String?       // JSON string of sheet previews, rows, or thumbnail
   extractedText  String?
   createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @default(now()) @updatedAt
 
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation   Conversation? @relation(fields: [conversationId], references: [id])
 
   @@index([userId])
   @@index([conversationId])
+  @@index([category])
+  @@index([isGenerated])
 }
 
 model AuditLog {

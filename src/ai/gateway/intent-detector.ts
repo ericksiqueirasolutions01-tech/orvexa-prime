@@ -190,3 +190,4 @@ export function detectUserIntent(prompt: string, hasFiles: boolean = false): Int
     reason: "Processamento balanceado padrão para assistência geral de alta fidelidade.",
   };
 }
+

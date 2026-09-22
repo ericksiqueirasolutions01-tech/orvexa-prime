@@ -117,3 +117,4 @@ runTests().catch((err) => {
   console.error("FALHA NO TESTE:", err);
   process.exit(1);
 });
+

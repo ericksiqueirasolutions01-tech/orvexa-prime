@@ -216,3 +216,4 @@ export async function dispatchProviderStream(params: {
 
   throw new Error(`Provedor "${providerSlug}" não suportado.`);
 }
+
