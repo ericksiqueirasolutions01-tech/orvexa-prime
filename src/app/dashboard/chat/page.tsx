@@ -622,19 +622,18 @@ function ChatContent() {
 
     const fullNormalized = `${promptText} ${input}`.toLowerCase();
     const hasPriceTrigger =
-      fullNormalized.includes("12, 99") ||
-      fullNormalized.includes("12,99") ||
-      fullNormalized.includes("12.99") ||
-      fullNormalized.includes("preço") ||
-      fullNormalized.includes("preco") ||
-      fullNormalized.includes("etiqueta") ||
-      fullNormalized.includes("alterar") ||
-      fullNormalized.includes("imagem é minha");
+      Boolean(activeImageUrl) &&
+      (fullNormalized.includes("etiqueta de preço") ||
+       fullNormalized.includes("etiqueta de preco") ||
+       fullNormalized.includes("ajustar preço na imagem") ||
+       fullNormalized.includes("ajuste de preço na imagem") ||
+       fullNormalized.includes("colocar preço na imagem") ||
+       fullNormalized.includes("colocar preço na foto"));
 
-    let detectedPrice = "12,99";
-    const priceMatch = promptText.match(/\b\d+([.,]\d{2})\b/) || input.match(/\b\d+([.,]\d{2})\b/);
-    if (priceMatch) {
-      detectedPrice = priceMatch[0].replace(".", ",");
+    let detectedPrice: string | undefined = undefined;
+    if (hasPriceTrigger) {
+      const priceMatch = promptText.match(/\b\d+([.,]\d{2})\b/) || input.match(/\b\d+([.,]\d{2})\b/);
+      detectedPrice = priceMatch ? priceMatch[0].replace(".", ",") : "12,99";
     }
 
     if (currentFiles.length > 0) {
@@ -647,7 +646,7 @@ function ChatContent() {
         })
         .join("\n\n");
 
-      promptText = `${filesExtracted}\n\n[INSTRUÇÃO DO USUÁRIO]:\n${promptText || "Por favor, analise minuciosamente os dados contidos neste documento/imagem. Se for um pedido de ajuste de preço, realize o ajuste imediatamente com padrão comercial de excelência."}`;
+      promptText = `${filesExtracted}\n\n[INSTRUÇÃO DO USUÁRIO]:\n${promptText || "Por favor, analise minuciosamente os dados contidos neste documento/imagem e forneça um retorno estruturado e preciso."}`;
     }
 
     const userMsg: ChatMessage = {
@@ -1093,8 +1092,8 @@ function ChatContent() {
                 )}
               </div>
 
-              {/* Arte Promocional e Etiqueta Interativa com Preço Atualizado */}
-              {msg.role === "assistant" && (msg.isPriceAdjustment || msg.content.includes("12,99") || msg.content.includes("12, 99") || msg.content.includes("12.99")) && (
+              {/* Arte Promocional e Etiqueta Interativa (apenas quando solicitado explicitamente com imagem anexada) */}
+              {msg.role === "assistant" && msg.isPriceAdjustment && msg.imageUrl && (
                 <InteractivePriceCard
                   initialPrice={msg.targetPrice || "12,99"}
                   productImageUrl={msg.imageUrl}
