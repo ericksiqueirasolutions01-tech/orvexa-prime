@@ -1,0 +1,339 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @default(uuid())
+  name          String
+  email         String         @unique
+  passwordHash  String
+  planId        String?
+  status        String         @default("PENDING_PAYMENT") // ACTIVE, BLOCKED, PENDING_PAYMENT
+  role          String         @default("USER") // USER, ADMIN
+  avatarUrl     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  plan          Plan?          @relation(fields: [planId], references: [id])
+  subscriptions Subscription[]
+  payments      Payment[]
+  conversations Conversation[]
+  usageLogs     UsageLog[]
+  files         File[]
+  auditLogs     AuditLog[]
+  generatedImages GeneratedImage[]
+  projects        Project[]
+
+  @@index([email])
+  @@index([status])
+  @@index([role])
+}
+
+model Plan {
+  id             String         @id @default(uuid())
+  name           String         // START, PRO, PREMIUM, EMPRESA
+  slug           String         @unique
+  priceCents     Int            // in cents (ex: 4990 = R$ 49,90)
+  monthlyTokens  Int            // Monthly token quota
+  allowedModels  String         // JSON array of allowed model slugs
+  maxSeats       Int            @default(1)
+  features       String         // JSON array of features description
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  users          User[]
+  subscriptions  Subscription[]
+}
+
+model Subscription {
+  id                   String     @id @default(uuid())
+  userId               String
+  planId               String
+  status               String     @default("ACTIVE") // ACTIVE, PAST_DUE, CANCELED, TRIALING
+  currentPeriodStart   DateTime   @default(now())
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean    @default(false)
+  gatewayProvider      String     @default("STRIPE") // STRIPE, MERCADO_PAGO, ASAAS
+  externalSubscriptionId String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                 Plan       @relation(fields: [planId], references: [id])
+  payments             Payment[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Payment {
+  id             String        @id @default(uuid())
+  subscriptionId String?
+  userId         String
+  amountCents    Int
+  currency       String        @default("BRL")
+  status         String        @default("PENDING") // PENDING, CONFIRMED, FAILED, REFUNDED
+  gateway        String        @default("STRIPE") // STRIPE, MERCADO_PAGO, ASAAS
+  transactionId  String?
+  receiptUrl     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([transactionId])
+}
+
+model AiProvider {
+  id          String        @id @default(uuid())
+  name        String        // Anthropic, OpenAI, Google
+  slug        String        @unique // anthropic, openai, google
+  baseUrl     String?
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  models      AiModel[]
+  apiKeys     ApiKey[]
+  routerRules RouterRule[]
+}
+
+model ApiKey {
+  id                 String      @id @default(uuid())
+  providerId         String
+  name               String      // e.g., "Claude API 01", "OpenAI Key 02"
+  encryptedKey       String      // AES-256-GCM cipher text
+  iv                 String      // Initialization vector
+  authTag            String      // Authentication tag
+  keyHint            String      // Safe preview: "...x98a"
+  tokenLimitMonthly  Int         @default(0) // 0 = unlimited
+  tokensUsedMonth    Int         @default(0)
+  priority           Int         @default(1) // 1 highest, 10 lowest
+  customBaseUrl      String?     // Optional custom proxy endpoint (e.g. https://my-proxy.com/v1)
+  capabilities       String      @default("[\"TEXTO\",\"CODIGO\",\"DOCUMENTO\"]") // JSON array
+  costAccumulatedCents Float     @default(0)
+  status             String      @default("ACTIVE") // ACTIVE, WARNING_90, BLOCKED_QUOTA, RATE_LIMITED, ERROR, DISABLED
+  errorCount         Int         @default(0)
+  lastUsedAt         DateTime?
+  quarantinedUntil   DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  provider           AiProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  usageLogs          UsageLog[]
+  messages           Message[]
+
+  @@index([providerId])
+  @@index([status])
+  @@index([priority])
+}
+
+model AiModel {
+  id                    String        @id @default(uuid())
+  providerId            String
+  name                  String        // e.g. "Claude 3.5 Sonnet", "GPT-4o", "Gemini 1.5 Pro"
+  modelIdentifier       String        @unique // e.g. "claude-3-5-sonnet-20241022", "gpt-4o"
+  category              String        // CODE, TEXT, RESEARCH, MULTIMODAL
+  capabilities          String        @default("[\"TEXTO\"]") // JSON array of supported capabilities
+  contextWindow         Int           @default(128000)
+  costPer1kInputCents   Float         @default(0.3)
+  costPer1kOutputCents  Float         @default(1.5)
+  isActive              Boolean       @default(true)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  provider              AiProvider    @relation(fields: [providerId], references: [id])
+  agents                Agent[]
+  usageLogs             UsageLog[]
+  routerRules           RouterRule[]
+
+  @@index([providerId])
+  @@index([category])
+}
+
+model Agent {
+  id               String         @id @default(uuid())
+  name             String         // ORVEXA DEV, ORVEXA MARKETING, ORVEXA ESTUDOS, ORVEXA JURÍDICO
+  slug             String         @unique
+  description      String
+  systemPrompt     String
+  preferredModelId String?
+  iconName         String         @default("Bot")
+  category         String         @default("GERAL")
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  preferredModel   AiModel?       @relation(fields: [preferredModelId], references: [id])
+  conversations    Conversation[]
+}
+
+model Conversation {
+  id              String      @id @default(uuid())
+  userId          String
+  agentId         String?
+  title           String      @default("Nova Conversa")
+  modelPreference String      @default("orvexa-prime") // "claude", "openai", "gemini", "orvexa-prime"
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent           Agent?      @relation(fields: [agentId], references: [id])
+  messages        Message[]
+  files           File[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  role           String       // USER, ASSISTANT, SYSTEM
+  content        String
+  tokensIn       Int          @default(0)
+  tokensOut      Int          @default(0)
+  costCents      Float        @default(0)
+  latencyMs      Int          @default(0)
+  apiKeyUsedId   String?
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  apiKeyUsed     ApiKey?      @relation(fields: [apiKeyUsedId], references: [id])
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model UsageLog {
+  id                String    @id @default(uuid())
+  userId            String
+  modelId           String?
+  apiKeyId          String?
+  tokensInput       Int       @default(0)
+  tokensOutput      Int       @default(0)
+  totalTokens       Int       @default(0)
+  costCents         Float     @default(0)
+  priceChargedCents Float     @default(0)
+  latencyMs         Int       @default(0)
+  status            String    @default("SUCCESS") // SUCCESS, FAILOVER, FAILED
+  createdAt         DateTime  @default(now())
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  model             AiModel?  @relation(fields: [modelId], references: [id])
+  apiKey            ApiKey?   @relation(fields: [apiKeyId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([status])
+}
+
+model File {
+  id             String        @id @default(uuid())
+  userId         String
+  conversationId String?
+  originalName   String
+  storedPath     String
+  fileSizeBytes  Int
+  mimeType       String
+  extractedText  String?
+  createdAt      DateTime      @default(now())
+
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model AuditLog {
+  id           String    @id @default(uuid())
+  actorId      String?
+  action       String    // e.g. API_KEY_CREATED, USER_BLOCKED, ROUTER_RULE_UPDATED
+  resourceType String    // USER, API_KEY, PLAN, ROUTER, PAYMENT
+  resourceId   String?
+  details      String?   // JSON string
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
+
+  actor        User?     @relation(fields: [actorId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model RouterRule {
+  id               String     @id @default(uuid())
+  intentName       String     // PROGRAMACAO, TEXTO_COPY, PESQUISA, DOCUMENTOS
+  keywords         String     // JSON array string of trigger keywords
+  targetProviderId String
+  targetModelId    String
+  priority         Int        @default(1)
+  isActive         Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  targetProvider   AiProvider @relation(fields: [targetProviderId], references: [id])
+  targetModel      AiModel    @relation(fields: [targetModelId], references: [id])
+
+  @@index([intentName])
+  @@index([isActive])
+}
+
+model GeneratedImage {
+  id             String    @id @default(uuid())
+  userId         String
+  prompt         String
+  refinedPrompt  String?
+  modelUsed      String
+  imageUrl       String
+  style          String?   // REALISTA, CYBERPUNK, 3D, MINIMALISTA, LOGO
+  dimensions     String    @default("1024x1024")
+  createdAt      DateTime  @default(now())
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  userId      String
+  name        String
+  slug        String
+  segment     String    // LOJA, CLINICA, RESTAURANTE, IGREJA, ADVOGADO, PETSHOP, LANDING
+  description String?
+  layoutData  String?   // JSON representation of site layout & blocks
+  status      String    @default("DRAFT") // DRAFT, GENERATING, PUBLISHED
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Template {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  segment     String    // LOJA, CLINICA, RESTAURANTE, IGREJA, ADVOGADO, PETSHOP, LANDING
+  description String
+  previewUrl  String?
+  layoutData  String    // JSON template blocks
+  isSystem    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+}
+
+

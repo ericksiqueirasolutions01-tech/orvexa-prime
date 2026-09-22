@@ -1,0 +1,85 @@
+import { SignJWT, jwtVerify } from "jose";
+import bcrypt from "bcryptjs";
+import { cookies } from "next/headers";
+import { prisma } from "./prisma";
+
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || "orvexa_prime_super_secret_jwt_key_2026_production_grade_token_guard"
+);
+
+export const AUTH_COOKIE_NAME = "orvexa_auth_token";
+
+export interface UserSession {
+  id: string;
+  name: string;
+  email: string;
+  role: "ADMIN" | "USER";
+  status: "ACTIVE" | "BLOCKED" | "PENDING_PAYMENT";
+  planId?: string | null;
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = await bcrypt.genSalt(10);
+  return bcrypt.hash(password, salt);
+}
+
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+
+export async function createAuthToken(payload: UserSession): Promise<string> {
+  return new SignJWT({ ...payload })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("7d")
+    .sign(JWT_SECRET);
+}
+
+export async function verifyAuthToken(token: string): Promise<UserSession | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    return payload as unknown as UserSession;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retrieves the current authenticated user session from HTTP-Only cookie.
+ * Performs real-time status validation from database to prevent stale access.
+ */
+export async function getCurrentUser(): Promise<UserSession | null> {
+  const cookieStore = cookies();
+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+
+  if (!token) return null;
+
+  const session = await verifyAuthToken(token);
+  if (!session?.id) return null;
+
+  // Real-time lookup to ensure user wasn't blocked or altered
+  const user = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      status: true,
+      planId: true,
+    },
+  });
+
+  if (!user) return null;
+  if (user.status === "BLOCKED") return null;
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role as "ADMIN" | "USER",
+    status: user.status as "ACTIVE" | "BLOCKED" | "PENDING_PAYMENT",
+    planId: user.planId,
+  };
+}
+
