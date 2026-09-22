@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getHealthyApiKeys, markKeySuccess } from "@/lib/ai-gateway";
 import { decryptApiKey } from "@/lib/crypto";
 import { checkRateLimit } from "@/lib/rate-limiter";
+import { buildProfessionalPrompt } from "@/lib/prompt-engine";
 
 export async function POST(req: Request) {
   const session = await getCurrentUser();
@@ -141,19 +142,13 @@ export async function POST(req: Request) {
     let finalImageUrl = externalImageUrl;
 
     if (!finalImageUrl) {
-      const styleKeywords =
-        style === "3D Render"
-          ? "3d render, octane render, masterpiece, vivid volumetric lighting, hyperdetailed 8k"
-          : style === "Cyberpunk / Neon"
-          ? "cyberpunk, neon glow, futuristic, high contrast, cinematic, 8k"
-          : style === "Minimalista"
-          ? "minimalist style, clean composition, artistic, elegant"
-          : style === "Logo / Vetorial"
-          ? "vector illustration, clean sharp logo, iconic, studio graphic"
-          : "photorealistic, ultra high definition 8k, detailed textures, cinematic lighting, masterpiece, vivid colors";
+      // Sempre processa via Prompt Engine com tradução semântica precisa
+      const structured = buildProfessionalPrompt(refinedPrompt || prompt, {
+        aspectRatio,
+        styleOverride: style,
+      });
 
-      const basePrompt = refinedPrompt || prompt;
-      const fullArtPrompt = `${basePrompt}, ${styleKeywords}`;
+      const fullArtPrompt = structured.masterPrompt;
       const seed = Math.floor(Math.random() * 9000000) + 1000000;
 
       // Gera a imagem fotográfica real via motor neural sem marcas d'água

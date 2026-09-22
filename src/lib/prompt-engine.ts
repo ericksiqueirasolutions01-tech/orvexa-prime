@@ -1,19 +1,7 @@
 /**
  * PROMPT ENGINE — ORVEXA PRIME DIGITAL
- * Transforma pedidos simples do usuário em prompts estruturados de altíssimo nível cinematográfico e comercial.
- * 
- * Estrutura de 11 parâmetros exigida pelo Prompt Mestre:
- * - objetivo
- * - público
- * - estilo
- * - cenário
- * - iluminação
- * - composição
- * - cores
- * - câmera
- * - qualidade
- * - formato
- * - negative prompt
+ * Transforma pedidos em linguagem natural (PT-BR) em prompts de difusão cinematográfica
+ * de altíssima fidelidade com tradução semântica inteligente e parâmetros visuais.
  */
 
 export interface StructuredPromptDetails {
@@ -37,6 +25,89 @@ export interface PromptEngineOptions {
   styleOverride?: string;
 }
 
+/**
+ * Converte e enriquece prompts em linguagem natural (PT-BR) para termos de difusão em inglês de alta fidelidade
+ */
+export function translateToArtisticEnglish(userInput: string): { englishSubject: string; contextType: string } {
+  let text = userInput.trim().toLowerCase();
+
+  // 1. Remove ruídos conversacionais em português com precisão
+  text = text.replace(/^(quero\s+que\s+voc[êe]\s+crie|quero\s+que\s+crie|quero\s+criar|quero|crie|cria|gere|fa[çc]a|desenhe)\s+/gi, "");
+  text = text.replace(/^(uma\s+imagem\s+(de\s+|do\s+|da\s+|dos\s+|das\s+)?|uma\s+foto\s+(de\s+|do\s+|da\s+)?|um\s+desenho\s+(de\s+|do\s+|da\s+)?|imagem\s+(de\s+|do\s+|da\s+)?|foto\s+(de\s+|do\s+|da\s+)?)/gi, "");
+  text = text.replace(/^(e\s+com\s+|com\s+|onde\s+tenha\s+|mostrando\s+)/gi, "");
+
+  let contextType = "GERAL";
+
+  // 2. Mapeamentos semânticos inteligentes específicos
+  const mappings: [RegExp, string, string][] = [
+    // Cristo Redentor & Monumentos
+    [/cristo\s+redentor/gi, "Christ the Redeemer statue atop Corcovado mountain in Rio de Janeiro", "MONUMENT"],
+    [/torre\s+eiffel/gi, "Eiffel Tower in Paris", "MONUMENT"],
+    [/est[áa]tua\s+da\s+liberdade/gi, "Statue of Liberty in New York Harbor", "MONUMENT"],
+
+    // Aviação & Veículos
+    [/avi[aã]o\s+passando\s+perto/gi, "commercial jet airliner airplane flying close by in the sky with vapor trails", "VEHICLE"],
+    [/avi[aã]o\s+de\s+ca[çc]a/gi, "military fighter jet aircraft flying through clouds", "VEHICLE"],
+    [/avi[aã]o/gi, "modern airplane aircraft flying through the sky", "VEHICLE"],
+    [/helic[oó]ptero/gi, "modern helicopter flying in the sky", "VEHICLE"],
+    [/carro\s+esportivo/gi, "sleek aerodynamic luxury sports supercar", "VEHICLE"],
+    [/carro/gi, "luxury modern automobile", "VEHICLE"],
+    [/moto/gi, "custom modern motorcycle", "VEHICLE"],
+
+    // Sagrado & Bíblico
+    [/jesus\s+(e\s+seus\s+)?disc[ií]pulos/gi, "Jesus Christ standing majestically with his twelve disciples apostles", "SACRED"],
+    [/jesus\s+cristo/gi, "Jesus Christ with compassionate serene expression in classical robes", "SACRED"],
+    [/jesus/gi, "Jesus Christ with divine radiant aura", "SACRED"],
+    [/disc[ií]pulos|ap[oó]stolos/gi, "biblical disciples and apostles", "SACRED"],
+    [/anjo/gi, "magnificent celestial angel with grand feathered wings", "SACRED"],
+    [/igreja/gi, "historic grand cathedral church with stained glass windows", "SACRED"],
+
+    // Alimentos & Bebidas
+    [/hamb[uú]rguer/gi, "gourmet artisan burger with juicy grilled patty, melting cheddar cheese and fresh crisp lettuce", "FOOD"],
+    [/pizza/gi, "freshly baked artisan Italian wood-fired pizza with melted bubbling mozzarella", "FOOD"],
+    [/caf[eé]/gi, "steaming artisan espresso cup with rich crema and latte art", "FOOD"],
+    [/a[çc]a[íi]/gi, "delicious acai bowl with fresh banana slices, granola and berries", "FOOD"],
+
+    // Natureza & Paisagem
+    [/p[oô]r\s+do\s+sol/gi, "breathtaking golden hour sunset with vibrant orange and purple sky", "LANDSCAPE"],
+    [/nascer\s+do\s+sol/gi, "crisp early morning golden sunrise", "LANDSCAPE"],
+    [/praia/gi, "tropical white sand beach with crystal clear turquoise ocean waters and palm trees", "LANDSCAPE"],
+    [/montanha/gi, "majestic snow-capped mountain peaks touching dramatic clouds", "LANDSCAPE"],
+    [/floresta/gi, "mystical lush green forest with volumetric sunbeams filtering through tall trees", "LANDSCAPE"],
+
+    // Animais
+    [/le[aã]o/gi, "majestic African lion with magnificent golden mane and intense gaze", "ANIMAL"],
+    [/cavalo/gi, "powerful wild horse galloping freely", "ANIMAL"],
+    [/lobo/gi, "noble wild wolf in pristine nature", "ANIMAL"],
+    [/águia|aguia/gi, "majestic bald eagle soaring through the sky", "ANIMAL"],
+
+    // Cidades & Arquitetura
+    [/cidade\s+do\s+rio\s+de\s+janeiro/gi, "Rio de Janeiro dramatic landscape with Guanabara Bay and Sugarloaf Mountain", "MONUMENT"],
+    [/cidade|metr[oó]pole/gi, "futuristic bustling modern cityscape skyline with skyscrapers", "CITY"],
+  ];
+
+  let englishSubject = text;
+  for (const [pattern, replacement, ctx] of mappings) {
+    if (pattern.test(englishSubject)) {
+      englishSubject = englishSubject.replace(pattern, replacement);
+      if (contextType === "GERAL") contextType = ctx;
+    }
+  }
+
+  // Remove conjunções em português restantes (preservando Rio de Janeiro)
+  englishSubject = englishSubject
+    .replace(/,\s*e\s+/gi, ", ")
+    .replace(/\s+e\s+/gi, ", ")
+    .replace(/\s+com\s+/gi, ", with ")
+    .replace(/\s+passando\s+perto\s+/gi, " flying close by ")
+    .replace(/\s+passando\s+/gi, " flying passing by ")
+    .replace(/\s+perto\s+de\s+/gi, " close to ")
+    .replace(/\s+perto\s+/gi, " close by ")
+    .trim();
+
+  return { englishSubject, contextType };
+}
+
 export function buildProfessionalPrompt(
   userInput: string,
   options?: PromptEngineOptions
@@ -46,85 +117,54 @@ export function buildProfessionalPrompt(
   const aspectRatio = options?.aspectRatio || "1:1";
   const styleOverride = options?.styleOverride;
 
-  let objetivo = "Criar um visual comercial atraente de altíssima conversão e impacto estético.";
-  let publico = "Público executivo, consumidores exigentes e decisores comerciais.";
-  let estilo = styleOverride || "Fotografia comercial ultra-realista 8k, iluminação cinematográfica de estúdio.";
-  let cenario = "Cenário minimalista corporativo ou estúdio profissional com profundidade refinada e sombras suaves.";
-  let iluminacao = "Softbox difusa com luz de borda (rim light) sutil, contraste suave e reflexos controlados.";
-  let composicao = "Regra dos terços com objeto central em foco nítido, profundidade de campo rasa e bokeh elegante no fundo.";
-  let cores = "Paleta moderna com contraste rico, saturação equilibrada e tons vibrantes elegantes.";
-  let camera = "Capturado com Sony A7R V, lente Prime 85mm f/1.4, ISO 100, obturador rápido e foco cirúrgico.";
-  let qualidade = "Masterpiece, ultra-detailed, photorealistic, 8k resolution, ray tracing, sharp details, Hasselblad color science.";
-  let formato = aspectRatio === "16:9" ? "16:9 widescreen landscape" : aspectRatio === "9:16" ? "9:16 vertical story/reels" : aspectRatio === "4:5" ? "4:5 social feed" : "1:1 square";
-  let negativePrompt = "blurry, low quality, distorted, watermark, deformed, extra fingers, text errors, oversaturated, amateur, grainy, pixelated, bad anatomy";
+  const { englishSubject, contextType } = translateToArtisticEnglish(input);
 
-  // Ajustes de especialização conforme a categoria solicitada
-  if (category === "LOGO") {
-    objetivo = "Desenvolver uma identidade visual de marca icônica, memorável e moderna.";
-    publico = "Clientes corporativos, investidores e mercado premium.";
-    estilo = styleOverride || "Logo vetorial minimalista geométrico, design limpo estilo Apple/Nike, flat 2D com gradiente sutil.";
-    cenario = "Fundo sólido limpo de alto contraste (fundo escuro luxo ou branco estúdio).";
-    iluminacao = "Iluminação uniforme flat sem sombras duras, foco total na silhueta e geometria do símbolo.";
-    composicao = "Centralizado com proporção áurea equilibrada e margens de respiro amplas.";
-    cores = "Esquema monocromático premium com toques de ciano elétrico ou dourado champanhe.";
-    camera = "Renderização vetorial vetorial pura, linhas vetoriais SVG perfeitas, anti-aliasing de nível suíço.";
-    qualidade = "Vector masterpiece, sharp crisp edges, perfect symmetry, award-winning branding typography.";
-    negativePrompt = "photorealistic, complex scene, photographic artifacts, clutter, noisy textures, blurry lines";
-  } else if (category === "BANNER") {
-    objetivo = "Geração de banner promocional de alto impacto para divulgação de ofertas, e-commerce ou campanhas.";
-    publico = "Compradores online, clientes de varejo e seguidores em redes sociais.";
-    estilo = styleOverride || "Arte publicitária moderna de alta conversão, composição dinâmica com espaço reservado para tipografia.";
-    cenario = "Ambiente temático vibrante com elementos flutuantes sutis e atmosfera imersiva.";
-    iluminacao = "Luz volumétrica dramática com iluminação de recorte neon acentuada.";
-    composicao = "Composição assimétrica com espaço negativo estratégico na lateral para textos e ofertas.";
-    cores = "Cores de alta energia e contraste, gradientes modernos e saturação equilibrada.";
-    formato = "16:9 widescreen banner";
-    qualidade = "Commercial advertising standard, 8k poster quality, ultra-sharp rendering.";
-  } else if (category === "THUMBNAIL") {
-    objetivo = "Criação de miniatura de altíssimo clique (CTR) para YouTube ou vídeos online.";
-    publico = "Espectadores de plataformas digitais que buscam conteúdos dinâmicos e envolventes.";
-    estilo = styleOverride || "Estilo thumbnail moderno de YouTube, expressões marcantes, elementos ampliados e contraste extremo.";
-    cenario = "Cenário contextual dinâmico com iluminação de fundo vibrante.";
-    iluminacao = "Key light intensa sobre o elemento principal com rim light colorida (azul/laranja/ciano).";
-    composicao = "Close-up macro em primeiro plano, ângulos ligeiramente inclinados para transmitir dinamismo.";
-    formato = "16:9 widescreen";
-    qualidade = "Punchy contrast, crisp facial and object clarity, high-definition digital painting.";
-  } else if (category === "MOCKUP") {
-    objetivo = "Apresentar produto físico, embalagem ou aplicativo em contexto real de uso de luxo.";
-    publico = "Compradores B2B, lojistas e consumidores de e-commerce.";
-    estilo = styleOverride || "Mockup 3D realista renderizado em Octane Render com acabamento de material acetinado e texturas físicas.";
-    cenario = "Pódio elegante de concreto arquitetônico ou madeira nobre com plantas desidratadas ao fundo.";
-    iluminacao = "Luz natural difusa de janela lateral com sombras suaves e reflexos caústicos.";
-    camera = "Macro 100mm f/2.8, foco perfeito nos detalhes do rótulo e textura da embalagem.";
-    qualidade = "3D photorealistic product render, hyper-detailed textures, Octane 2026 rendering.";
+  // Parâmetros adaptativos conforme o tipo de assunto detectado
+  let objetivo = "Geração de imagem em altíssima definição com máxima fidelidade ao assunto solicitado.";
+  let publico = "Audiência exigente, apreciadores de arte digital e comunicação visual de impacto.";
+  let estilo = styleOverride || "Fotografia ultra-realista 8K, iluminação cinematográfica de alta fidelidade.";
+  let cenario = "Cenário panorâmico aberto e autêntico ao tema com perspectiva dinâmica e atmosfera realista.";
+  let iluminacao = "Luz natural cinematográfica de golden hour com sombras suaves e contraste refinado.";
+  let composicao = "Composição equilibrada em grande escala com objeto principal em destaque majestoso.";
+  let cores = "Gradientes naturais ricos, saturação precisa e tons cinematográficos vibrantes.";
+  let camera = "Lente grande-angular panorâmica 24-70mm, perspectiva aérea ampla e foco nítido.";
+  let qualidade = "Masterpiece, 8k resolution, photorealistic, ultra-detailed textures, ray tracing, sharp focus.";
+  let formato = aspectRatio === "16:9" ? "16:9 widescreen" : aspectRatio === "9:16" ? "9:16 vertical" : aspectRatio === "4:5" ? "4:5 retrato" : "1:1 quadrado";
+  let negativePrompt = "blurry, low quality, distorted, watermark, deformed, bad anatomy, text errors, amateurish, grainy, pixelated";
+
+  let masterPromptSubject = englishSubject;
+
+  // Ajustes de contexto específicos
+  if (contextType === "MONUMENT") {
+    objetivo = "Capturar o monumento em escala monumental com elementos aéreos e paisagem autêntica.";
+    cenario = "Cenário real icônico com relevo topográfico dramático, montanhas e céu dinâmico.";
+    camera = "Fotografia aérea com lente cinematográfica panorâmica, perspectiva épica de helicóptero/drone.";
+    iluminacao = "Luz do dia dramática com nuvens volumétricas no horizonte e atmosfera vívida.";
+    masterPromptSubject = `${englishSubject}, iconic landmark panorama, breathtaking aerial drone view, majestic atmosphere`;
+  } else if (contextType === "SACRED") {
+    objetivo = "Criar obra sacra solene, reverente e de imensa beleza espiritual e artística.";
+    estilo = "Pintura clássica renascentista contemporânea hiper-realista, solenidade e atmosfera sagrada.";
+    cenario = "Cenário bíblico grandioso com atmosfera de paz celestial e horizonte sagrado.";
+    iluminacao = "Raios de luz dourada divina descendo do céu (god rays), brilho celestial suave e caloroso.";
+    camera = "Composição clássica atemporal com dignidade e grandiosidade solene.";
+    masterPromptSubject = `${englishSubject}, serene divine light beams, holy majestic atmosphere, classical biblical art masterpiece`;
+  } else if (contextType === "FOOD") {
+    objetivo = "Fotografia gastronômica comercial apetitosa de alto impacto para restaurantes.";
+    estilo = "Food photography profissional de revista gastronômica.";
+    cenario = "Mesa rústica de restaurante gourmet com ingredientes frescos e apresentação impecável.";
+    iluminacao = "Luz suave de estúdio culinário realçando texturas crocantes e queijo derretido.";
+    camera = "Lente macro 50mm f/1.8 com profundidade de campo rasa e foco impecável no alimento.";
+    masterPromptSubject = `${englishSubject}, gourmet food photography, freshly prepared, appetizing studio lighting`;
+  } else if (contextType === "VEHICLE") {
+    objetivo = "Registro dinâmico de veículo em movimento ou perspectiva de ação em alta velocidade.";
+    cenario = "Céu aberto com nuvens e horizonte amplo, sensação real de voo e escala.";
+    camera = "Lente teleobjetiva de ação com rastreamento dinâmico e nitidez cirúrgica.";
+    iluminacao = "Reflexos metálicos solares brilhantes na fuselagem/lataria com céu límpido.";
+    masterPromptSubject = `${englishSubject}, dynamic action perspective, crisp mechanical details, vivid clear blue sky`;
   }
 
-  // Se o usuário mencionou alimentos, eletrônicos, roupas ou cosméticos
-  const lower = input.toLowerCase();
-  if (lower.includes("hambúrguer") || lower.includes("comida") || lower.includes("lanche") || lower.includes("pizza") || lower.includes("prato")) {
-    estilo = "Fotografia gastronômica comercial 8k, vapor quente sutil saindo do alimento, gotas de água frescas, textura apetitosa brilhante.";
-    cenario = "Tábua de madeira nobre rústica com ingredientes frescos desfocados ao fundo.";
-    iluminacao = "Luz suave de 45 graus realçando o brilho do queijo derretido e textura crocante.";
-  } else if (lower.includes("carro") || lower.includes("veículo") || lower.includes("automóvel")) {
-    estilo = "Fotografia automotiva comercial cinematográfica, pintura com acabamento espelhado e reflexos perfeitos.";
-    cenario = "Estrada sinuosa moderna à beira-mar ou estúdio com piso reflexivo escuro.";
-    iluminacao = "Linhas de luz reflexivas contornando a lataria do carro ao pôr do sol.";
-  } else if (lower.includes("etiqueta") || lower.includes("preço") || lower.includes("promoção")) {
-    estilo = "Card promocional de produto com selo de destaque para preço, tipografia comercial arrojada e estética de varejo premium.";
-  }
-
-  // Montagem do Master Prompt refinado
-  const masterPrompt = `[THEME]: ${input}
-[OBJECTIVE]: ${objetivo}
-[STYLE]: ${estilo}
-[ENVIRONMENT]: ${cenario}
-[LIGHTING]: ${iluminacao}
-[COMPOSITION]: ${composicao}
-[COLOR PALETTE]: ${cores}
-[CAMERA & SPECS]: ${camera}
-[QUALITY]: ${qualidade}
-[ASPECT RATIO]: ${formato}
-[NEGATIVE PROMPT]: ${negativePrompt}`;
+  // Master Prompt limpo e conciso em inglês direto para o motor de difusão neural
+  const masterPrompt = `${masterPromptSubject}, cinematic lighting, photorealistic 8k, ultra-detailed textures, highly detailed, dramatic composition, masterpiece, professional photography`;
 
   return {
     objetivo,
