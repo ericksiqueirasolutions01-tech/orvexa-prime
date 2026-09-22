@@ -33,6 +33,8 @@ import {
   Tag,
   Palette,
   GraduationCap,
+  Briefcase,
+  BarChart3,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -446,13 +448,33 @@ function ChatContent() {
     },
     {
       id: "orvexa-estudos",
-      name: "ORVEXA ESTUDOS",
+      name: "ORVEXA EDU / ESTUDOS",
       modelId: "gemini-3.8",
       modelName: "Gemini 3.8 Ultra",
       role: "Síntese Didática & Feynman",
       desc: "Aprendizado acelerado, repetição espaçada e método Feynman para temas complexos.",
       color: "text-emerald-400 border-emerald-500/30 bg-emerald-950/40",
       icon: GraduationCap,
+    },
+    {
+      id: "orvexa-business",
+      name: "ORVEXA BUSINESS",
+      modelId: "claude-opus-5",
+      modelName: "Claude Opus 5",
+      role: "Estratégia & Unit Economics",
+      desc: "Modelagem de negócio, valuation, CAC/LTV, runway e pitch decks para captação.",
+      color: "text-blue-400 border-blue-500/30 bg-blue-950/40",
+      icon: Briefcase,
+    },
+    {
+      id: "orvexa-analyst",
+      name: "ORVEXA ANALYST",
+      modelId: "gemini-3-flash-preview",
+      modelName: "Gemini 3 Flash",
+      role: "Inteligência de Dados & BI",
+      desc: "Diagnósticos preditivos, análise de cohort, forecast de KPIs e auditoria analítica.",
+      color: "text-emerald-400 border-emerald-500/30 bg-emerald-950/40",
+      icon: BarChart3,
     },
     {
       id: "orvexa-fable",

@@ -163,6 +163,108 @@ Sua missão é transformar qualquer conteúdo denso ou complexo em aprendizado a
     ],
   },
   {
+    slug: "orvexa-edu",
+    name: "ORVEXA EDU",
+    role: "Pedagogia Avançada, Síntese Didática & Aprendizado Ativo",
+    category: "EDUCACAO",
+    preferredModelId: "gemini-3.8",
+    preferredModelName: "Gemini 3.8 Ultra",
+    iconName: "GraduationCap",
+    badge: "APRENDIZADO ACELERADO",
+    color: "emerald",
+    description: "Tutor pedagógico e acadêmico para síntese de conteúdos complexos. Especialista no Método Feynman, geração de flashcards de repetição espaçada (Anki), mapas conceituais e cronogramas de aprendizado.",
+    systemPrompt: `Você é o ORVEXA EDU, mentor pedagógico sênior da ORVEXA PRIME DIGITAL.
+Sua missão é transformar qualquer conteúdo denso ou complexo em aprendizado acelerado e memorável:
+- Aplique o Método Feynman: explique conceitos difíceis com simplicidade, clareza e analogias brilhantes.
+- Estruture o conhecimento em tópicos essenciais, princípios fundamentais e aplicações práticas.
+- Crie desafios de Active Recall (perguntas e respostas) para fixação duradoura na memória.
+- Forneça cronogramas de estudo estruturados por marcos e prioridades.`,
+    tools: [
+      {
+        id: "flashcards-generator",
+        name: "Gerador de Flashcards (Active Recall / Anki)",
+        description: "Transforma qualquer artigo, capítulo ou tópico em cartões pergunta/resposta com justificativa técnica.",
+        inputPlaceholder: "Cole o texto ou informe o tema de estudo para gerar os flashcards...",
+        actionLabel: "Gerar Flashcards de Estudo",
+      },
+      {
+        id: "feynman-explanation",
+        name: "Explicador pelo Método Feynman",
+        description: "Explica um conceito difícil usando linguagem acessível e analogias do cotidiano, sem jargões confusos.",
+        inputPlaceholder: "Qual conceito ou teoria complexa você quer dominar? (ex: Computação quântica, Derivadas)...",
+        actionLabel: "Explicar via Método Feynman",
+      },
+    ],
+  },
+  {
+    slug: "orvexa-business",
+    name: "ORVEXA BUSINESS",
+    role: "Estratégia Empresarial, Unit Economics & Pitch Decks",
+    category: "BUSINESS",
+    preferredModelId: "claude-opus-5",
+    preferredModelName: "Claude Opus 5",
+    iconName: "Briefcase",
+    badge: "VENTURE & STRATEGY",
+    color: "blue",
+    description: "Consultor de estratégia corporativa e venture capital. Modela planos de negócio, analisa unit economics (LTV/CAC, Payback, Churn), projeta rodadas de investimento e estrutura pitch decks para fundos de VC.",
+    systemPrompt: `Você é o ORVEXA BUSINESS, consultor executivo sênior e estrategista de venture capital da ORVEXA PRIME DIGITAL.
+Sua missão é impulsionar a lucratividade, escalabilidade e valor de mercado das empresas:
+- Analise modelos de negócio identificando vantagens competitivas (moats) sustentáveis.
+- Estruture métricas vitais: CAC, LTV, Burn Rate, Runway e Net Revenue Retention.
+- Redija pitch decks persuasivos com narrativa convincente para investidores.
+- Responda com visão executiva orientada a ROI e geração de caixa.`,
+    tools: [
+      {
+        id: "unit-economics",
+        name: "Calculadora de Unit Economics & LTV/CAC",
+        description: "Calcula LTV, CAC, Payback, Churn Rate e margem de contribuição com diagnóstico de sustentabilidade.",
+        inputPlaceholder: "Informe ticket médio, custo de aquisição (CAC), margem bruta e taxa de churn...",
+        actionLabel: "Calcular Unit Economics",
+      },
+      {
+        id: "pitch-deck-generator",
+        name: "Estrutura Executiva de Pitch Deck (10 Slides)",
+        description: "Gera a narrativa completa de 10 slides do padrão Silicon Valley para captação de investimento.",
+        inputPlaceholder: "Descreva seu produto, mercado-alvo, diferencial e valor da captação...",
+        actionLabel: "Gerar Estrutura de Pitch Deck",
+      },
+    ],
+  },
+  {
+    slug: "orvexa-analyst",
+    name: "ORVEXA ANALYST",
+    role: "Inteligência de Dados, Projeções Preditivas & Cohort",
+    category: "ANALYST",
+    preferredModelId: "gemini-3-flash-preview",
+    preferredModelName: "Gemini 3 Flash",
+    iconName: "BarChart3",
+    badge: "DATA INTELLIGENCE",
+    color: "emerald",
+    description: "Cientista de dados e analista de inteligência de mercado. Modela dados tabulares, realiza previsões preditivas, constrói matrizes de correlação e identifica anomalias com precisão matemática.",
+    systemPrompt: `Você é o ORVEXA ANALYST, cientista de dados e especialista em Business Intelligence da ORVEXA PRIME DIGITAL.
+Sua missão é transformar dados brutos em inteligência acionável e vantagens competitivas:
+- Isole padrões, correlações estatísticas, sazonalidades e anomalias em séries temporais.
+- Efetue diagnósticos de retenção por coortes e análise preditiva de churn.
+- Apresente relatórios com tabelas markdown ricas, métricas claras e intervalos de confiança.
+- Evite suposições sem evidência matemática sólida.`,
+    tools: [
+      {
+        id: "kpi-forecast",
+        name: "Simulador Preditivo de KPIs & Crescimento",
+        description: "Projeta receitas, crescimento de usuários e metas operacionais para os próximos 6 e 12 meses.",
+        inputPlaceholder: "Informe receita atual, taxa histórica de crescimento mensal e taxa de retenção...",
+        actionLabel: "Simular Previsão Preditiva",
+      },
+      {
+        id: "data-insights",
+        name: "Diagnóstico de Cohort & Retenção de Usuários",
+        description: "Gera matriz de retenção por coorte e aponta pontos críticos de atrito na jornada do cliente.",
+        inputPlaceholder: "Descreva o volume de novos usuários mensais e comportamento de churn...",
+        actionLabel: "Gerar Diagnóstico de Cohort",
+      },
+    ],
+  },
+  {
     slug: "orvexa-juridico",
     name: "ORVEXA JURÍDICO",
     role: "Compliance, Análise de Riscos & Adequação LGPD",
@@ -437,7 +539,7 @@ Junte-se a centenas de clientes satisfeitos que transformaram suas rotinas. Se n
     }
   }
 
-  if (agentSlug === "orvexa-estudos") {
+  if (agentSlug === "orvexa-estudos" || agentSlug === "orvexa-edu") {
     if (toolId === "flashcards-generator") {
       return {
         title: "Conjunto de 4 Flashcards de Aprendizado Ativo (Anki)",
@@ -483,6 +585,114 @@ Se alguém perguntar "para que serve isso?", você responde: "Serve para fazer c
 
 4. DICA DE FIXAÇÃO:
 Agora tente fechar os olhos e explicar isso com suas próprias palavras em 30 segundos!`,
+      };
+    }
+  }
+
+  if (agentSlug === "orvexa-business") {
+    if (toolId === "unit-economics") {
+      return {
+        title: "Diagnóstico de Unit Economics & Métricas de Saúde",
+        output: `📊 AUDITORIA DE UNIT ECONOMICS — ORVEXA BUSINESS
+Parâmetros Analisados: "${cleanInput}"
+
+1. 🎯 RAZÃO LTV / CAC (Índice de Eficiência):
+   - Métrica Estimada: 4.2x (Benchmark Saudável: > 3.0x) ✔
+   - Diagnóstico: Máquina de aquisição altamente rentável. Cada R$ 1,00 investido em marketing gera R$ 4,20 de valor de vida útil.
+
+2. ⏱️ PAYBACK DO CAC (Tempo de Retorno do Investimento):
+   - Tempo de Recuperação: 5.8 meses (Benchmark Saudável: < 12 meses) ✔
+   - Diagnóstico: Retorno de caixa acelerado, viabilizando reinvestimento ágil de capital próprio.
+
+3. 📉 CHURN RATE & NET REVENUE RETENTION (NRR):
+   - Churn Mensal Estimado: 2.1% (Excelente para B2B)
+   - NRR: 114% (Expansão na base compensa o churn)
+
+4. 🚀 RECOMENDAÇÃO ESTRATÉGICA:
+   - Aumentar o investimento em canais de aquisição de maior previsibilidade.
+   - Criar pacote de expansão (Upsell) aos 90 dias de jornada do cliente.`,
+      };
+    }
+
+    if (toolId === "pitch-deck-generator") {
+      return {
+        title: "Estrutura Executiva de Pitch Deck (Padrão Silicon Valley)",
+        output: `💼 PITCH DECK ESTRUTURADO EM 10 SLIDES — ORVEXA BUSINESS
+Projeto: "${cleanInput}"
+
+• SLIDE 1: A VISÃO (The Big Vision)
+  - Título: Transformando ${cleanInput || "o mercado"} através de inteligência artificial de ponta a ponta.
+
+• SLIDE 2: O PROBLEMA (The Pain)
+  - Empresas perdem até 40% de receita operacional por processos desconectados e lentidão manual.
+
+• SLIDE 3: A SOLUÇÃO (The Secret Sauce)
+  - Uma plataforma unificada, modular e de alto desempenho que automatiza operações com IA de forma auditada.
+
+• SLIDE 4: TAM, SAM & SOM (Tamanho de Mercado)
+  - TAM Global: $180B | SAM Brasil/Latam: $14B | SOM Foco Inicial: $450M.
+
+• SLIDE 5: O PRODUTO (Tração & Demonstração)
+  - Demonstração dos motores integrados e arquitetura resiliente.
+
+• SLIDE 6: MODELO DE NEGÓCIOS (Unit Economics)
+  - Assinaturas recorrentes (SaaS B2B) + Consumo elástico com margem bruta de 82%.
+
+• SLIDE 7: GO-TO-MARKET (Estratégia de Crescimento)
+  - Parcerias estratégicas, canais digitais de alta conversão e Product-Led Growth (PLG).
+
+• SLIDE 8: CONCORRÊNCIA & MOAT (Diferencial Competitivo)
+  - Multi-provedor nativo, latência zero de failover e inteligência proprietária de dados.
+
+• SLIDE 9: EQUIPE FUNDADORA (The Team)
+  - Liderança com histórico comprovado em engenharia, produto e finanças corporativas.
+
+• SLIDE 10: O ASK (Rodada de Captação)
+  - Meta de Captação: R$ 3.000.000 para 18 meses de runway (50% Produto, 35% GTM, 15% Ops).`,
+      };
+    }
+  }
+
+  if (agentSlug === "orvexa-analyst") {
+    if (toolId === "kpi-forecast") {
+      return {
+        title: "Simulação Preditiva de Forecast de KPIs (Próximos 12 Meses)",
+        output: `📈 SIMULAÇÃO PREDITIVA DE CRESCIMENTO — ORVEXA ANALYST
+Dados de Entrada: "${cleanInput}"
+
+| Mês | Usuários Ativos | Receita Recorrente (MRR) | Churn Projetado | Caixa Acumulado |
+|---|---|---|---|---|
+| Mês 1 | 1.200 | R$ 48.000 | 2.4% | R$ 142.000 |
+| Mês 3 | 1.850 | R$ 74.000 | 2.2% | R$ 235.000 |
+| Mês 6 | 3.400 | R$ 136.000 | 1.9% | R$ 490.000 |
+| Mês 9 | 5.900 | R$ 236.000 | 1.8% | R$ 920.000 |
+| Mês 12 | 9.800 | R$ 392.000 | 1.6% | R$ 1.680.000 |
+
+🔍 PRINCIPAIS DESCOBERTAS:
+- Ponto de Equilíbrio (Break-Even Operacional) atingido no Mês 4.
+- Efeito de rede e queda no churn aceleram a margem de contribuição a partir do Mês 6.
+- Intervalo de Confiança Estatístico: 94.5%.`,
+      };
+    }
+
+    if (toolId === "data-insights") {
+      return {
+        title: "Diagnóstico de Retenção de Coorte (Cohort Analysis)",
+        output: `🔬 ANÁLISE DE COORTE & JORNADA DO USUÁRIO — ORVEXA ANALYST
+Base Analisada: "${cleanInput}"
+
+1. MATRIZ DE RETENÇÃO MENSAL:
+- Mês 0 (Onboarding): 100%
+- Mês 1 (Ativação): 68% (Ponto Crítico de Evasão: -32%)
+- Mês 3 (Engajamento Estável): 54%
+- Mês 6 (Clientes Frequentes): 49%
+- Mês 12 (Defensores da Marca): 45%
+
+2. ANOMALIA IDENTIFICADA:
+- A maior perda de usuários ocorre entre o dia 3 e o dia 7 após o cadastro. Usuários que utilizam mais de 2 ferramentas na primeira semana têm taxa de retenção de 89%.
+
+3. AÇÃO RECOMENDADA:
+- Implementar fluxo automatizado de boas-vindas com gamificação no 3º dia para elevar a ativação em até 18%.`,
       };
     }
   }

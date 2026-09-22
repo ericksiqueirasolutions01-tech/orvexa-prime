@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { decryptApiKey } from "./crypto";
+import { buildMemoryContextPrompt, extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 
 export interface ChatMessageInput {
   role: "user" | "assistant" | "system";
@@ -354,9 +355,19 @@ DIRETRIZES FUNDAMENTAIS:
 4. Quando o usuário de fato solicitar ajustes comerciais, criação de arte ou precificação de sua loja/marca, execute com excelência comercial e design refinado.
 5. Seja rápido, direto, sem rodeios ou discursos moralistas.`;
 
-  const effectiveSystemPrompt = systemPrompt
-    ? `${ORVEXA_CORE_INSTRUCTIONS}\n\n[ESPECIALISTA ATIVO]:\n${systemPrompt}`
-    : ORVEXA_CORE_INSTRUCTIONS;
+  const memoryPrompt = await buildMemoryContextPrompt(userId).catch(() => "");
+
+  const effectiveSystemPrompt = [
+    systemPrompt
+      ? `${ORVEXA_CORE_INSTRUCTIONS}\n\n[ESPECIALISTA ATIVO]:\n${systemPrompt}`
+      : ORVEXA_CORE_INSTRUCTIONS,
+    memoryPrompt,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  // Aprendizado de fatos da conversa em background
+  extractAndSaveFactsFromConversation(userId, lastUserMessage).catch(() => {});
 
   // 1. Resolve qual modelo usar (via ORVEXA PRIME ENGINE ou escolha manual)
   let decision: RouterDecision;
