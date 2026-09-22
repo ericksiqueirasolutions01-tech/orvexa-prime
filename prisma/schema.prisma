@@ -29,6 +29,7 @@ model User {
   generatedImages GeneratedImage[]
   projects        Project[]
   memories        UserMemory[]
+  agentMemories   AgentMemory[]
 
   @@index([email])
   @@index([status])
@@ -164,19 +165,52 @@ model AiModel {
 
 model Agent {
   id               String         @id @default(uuid())
-  name             String         // ORVEXA DEV, ORVEXA MARKETING, ORVEXA ESTUDOS, ORVEXA JURÍDICO
+  name             String         // ORVEXA DEV, ORVEXA DESIGN, ORVEXA MARKETING, ORVEXA EDU, etc.
   slug             String         @unique
+  role             String         @default("Especialista")
+  badge            String         @default("SPECIALIST")
+  color            String         @default("cyan")
   description      String
   systemPrompt     String
   preferredModelId String?
   iconName         String         @default("Bot")
   category         String         @default("GERAL")
+  tools            String         @default("[]") // JSON string of tools array
+  allowedRoles     String         @default("[\"USER\",\"ADMIN\"]")
+  allowedPlans     String         @default("[\"ALL\"]") // ["ALL"] or ["PRO", "PREMIUM", "EMPRESA"]
+  isSystem         Boolean        @default(true)
   isActive         Boolean        @default(true)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
   preferredModel   AiModel?       @relation(fields: [preferredModelId], references: [id])
   conversations    Conversation[]
+  agentMemories    AgentMemory[]
+
+  @@index([category])
+  @@index([isActive])
+  @@index([isSystem])
+}
+
+model AgentMemory {
+  id         String   @id @default(uuid())
+  agentId    String
+  userId     String
+  key        String   // e.g. "stack_frontend", "brand_voice", "focus_subject", "target_cac"
+  value      String   // Memory content
+  category   String   @default("GENERAL") // STACK, PREFERENCE, FACT, RULE, CONTEXT
+  tags       String   @default("[]") // JSON string of tags
+  importance Int      @default(3) // 1 to 5
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, userId])
+  @@index([agentId])
+  @@index([userId])
+  @@index([key])
 }
 
 model Conversation {

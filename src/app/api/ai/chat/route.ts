@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { executeAiGatewayStream, ChatMessageInput } from "@/lib/ai-gateway";
+import { buildAgentMemoryContextPrompt, extractAndSaveAgentFacts } from "@/ai/agents/agent-memory";
+import { dispatchAutonomousAgentTool } from "@/ai/agents/tool-dispatcher";
 
 export async function POST(req: Request) {
   try {
@@ -63,10 +65,13 @@ export async function POST(req: Request) {
       }
     }
 
+    const lastUserMessage = messages.filter((m: ChatMessageInput) => m.role === "user").slice(-1)[0];
+
     // 2. Busca informações do Agente se selecionado (suporta tanto UUID quanto slug)
     let systemPrompt: string | undefined;
     let effectiveModelPreference = modelPreference;
     let resolvedAgentId: string | null = null;
+    let autoToolBadge: string | undefined;
 
     if (agentId) {
       const agent = await prisma.agent.findFirst({
@@ -77,17 +82,89 @@ export async function POST(req: Request) {
       });
 
       if (agent) {
+        // Validação de status ativo
+        if (!agent.isActive && session.role !== "ADMIN") {
+          return NextResponse.json(
+            { error: `O especialista "${agent.name}" está temporariamente desativado.` },
+            { status: 403 }
+          );
+        }
+
+        // Validação de permissões por plano/role
+        let allowedRoles: string[] = ["USER", "ADMIN"];
+        let allowedPlans: string[] = ["ALL"];
+        try {
+          allowedRoles = JSON.parse(agent.allowedRoles || "[\"USER\",\"ADMIN\"]");
+        } catch {}
+        try {
+          allowedPlans = JSON.parse(agent.allowedPlans || "[\"ALL\"]");
+        } catch {}
+
+        const userRecord = await prisma.user.findUnique({
+          where: { id: session.id },
+          include: { plan: true },
+        });
+        const planSlug = userRecord?.plan?.slug?.toUpperCase() || "FREE";
+
+        const hasAccess =
+          (allowedRoles.includes(session.role) &&
+            (allowedPlans.includes("ALL") || allowedPlans.includes(planSlug))) ||
+          session.role === "ADMIN";
+
+        if (!hasAccess) {
+          return NextResponse.json(
+            {
+              error: `O agente ${agent.name} está disponível exclusivamente para os planos: ${allowedPlans.join(", ")}. Faça upgrade da sua conta.`,
+            },
+            { status: 403 }
+          );
+        }
+
         resolvedAgentId = agent.id;
         systemPrompt = agent.systemPrompt;
+
+        // Injeta a memória dedicada do agente sobre o usuário
+        const agentMemoryContext = await buildAgentMemoryContextPrompt(agent.id, session.id);
+        if (agentMemoryContext) {
+          systemPrompt += `\n${agentMemoryContext}`;
+        }
+
         if (agent.preferredModel && modelPreference === "orvexa-prime") {
           effectiveModelPreference = agent.preferredModel.modelIdentifier;
+        }
+
+        // Despacho Autônomo de Ferramentas
+        if (lastUserMessage) {
+          let agentTools: any[] = [];
+          try {
+            agentTools = JSON.parse(agent.tools || "[]");
+          } catch {}
+
+          const autoToolResult = dispatchAutonomousAgentTool(
+            agent.slug,
+            agentTools,
+            lastUserMessage.content
+          );
+
+          if (autoToolResult.executed && autoToolResult.result) {
+            autoToolBadge = autoToolResult.diagnosticBadge;
+            systemPrompt += `\n\n[FERRAMENTA ESPECIALIZADA ACIONADA AUTOMATICAMENTE PELO AGENTE]:
+Ferramenta: ${autoToolResult.tool?.name}
+Resultado Gerado:
+${autoToolResult.result.output}
+
+INSTRUÇÃO PARA SUA RESPOSTA:
+Apresente o resultado gerado acima para o usuário de forma profissional, enriquecendo com sua análise técnica e orientações práticas de acordo com sua especialidade (${agent.name}).`;
+          }
+
+          // Aprende fatos novos para a memória dedicada em background
+          extractAndSaveAgentFacts(agent.id, session.id, agent.slug, lastUserMessage.content).catch(() => {});
         }
       }
     }
 
     // 3. Salva ou atualiza a conversa e a mensagem do usuário com validação de FK
     let activeConvId = conversationId;
-    const lastUserMessage = messages.filter((m: ChatMessageInput) => m.role === "user").slice(-1)[0];
 
     // Validação estrita: se activeConvId foi enviado, confirma que existe no banco
     if (activeConvId) {
@@ -143,6 +220,7 @@ export async function POST(req: Request) {
         "x-orvexa-model": gatewayResult.decision.modelName,
         "x-orvexa-failover": gatewayResult.isFailover ? "true" : "false",
         "x-orvexa-key-status": gatewayResult.apiKeyName?.includes("Fallback") ? "fallback" : "live",
+        "x-orvexa-auto-tool": autoToolBadge ? encodeURIComponent(autoToolBadge) : "",
       },
     });
   } catch (error: any) {

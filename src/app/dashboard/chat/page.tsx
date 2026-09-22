@@ -39,6 +39,8 @@ import {
   Eye,
   Archive,
   UploadCloud,
+  Megaphone,
+  Wrench,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 
@@ -53,6 +55,7 @@ interface ChatMessage {
   imageUrl?: string;
   isPriceAdjustment?: boolean;
   targetPrice?: string;
+  autoToolBadge?: string;
 }
 
 interface ModelItem {
@@ -509,12 +512,22 @@ function ChatContent() {
       icon: Palette,
     },
     {
-      id: "orvexa-estudos",
-      name: "ORVEXA EDU / ESTUDOS",
+      id: "orvexa-marketing",
+      name: "ORVEXA MARKETING",
+      modelId: "claude-fable-5.1",
+      modelName: "Claude Fable 5.1",
+      role: "Growth Hacking, Copywriting & Campanhas",
+      desc: "Copywriting persuasivo, frameworks AIDA e PAS, anúncios de alta conversão e funis.",
+      color: "text-pink-400 border-pink-500/30 bg-pink-950/40",
+      icon: Megaphone,
+    },
+    {
+      id: "orvexa-edu",
+      name: "ORVEXA EDU",
       modelId: "gemini-3.8",
       modelName: "Gemini 3.8 Ultra",
-      role: "Síntese Didática & Feynman",
-      desc: "Aprendizado acelerado, repetição espaçada e método Feynman para temas complexos.",
+      role: "Pedagogia Avançada & Aprendizado Ativo",
+      desc: "Síntese didática, flashcards Anki de repetição espaçada e método Feynman para temas complexos.",
       color: "text-emerald-400 border-emerald-500/30 bg-emerald-950/40",
       icon: GraduationCap,
     },
@@ -811,6 +824,8 @@ function ChatContent() {
       const resolvedModel = response.headers.get("x-orvexa-model") || "ORVEXA AI";
       const resolvedIntent = response.headers.get("x-orvexa-intent") || "GERAL";
       const isFallback = response.headers.get("x-orvexa-key-status") === "fallback";
+      const rawAutoTool = response.headers.get("x-orvexa-auto-tool");
+      const autoToolBadge = rawAutoTool ? decodeURIComponent(rawAutoTool) : undefined;
       const returnedConvId = response.headers.get("x-orvexa-conversation-id");
       if (returnedConvId) {
         setConversationId(returnedConvId);
@@ -839,6 +854,7 @@ function ChatContent() {
                     modelBadge: resolvedModel,
                     intentBadge: resolvedIntent,
                     isFallback,
+                    autoToolBadge,
                     imageUrl: activeImageUrl,
                     isPriceAdjustment: hasPriceTrigger,
                     targetPrice: detectedPrice,
@@ -1167,6 +1183,12 @@ function ChatContent() {
                         }`}
                       >
                         {msg.isFallback ? "Modo Contingência (Sem Chave Oficial Ativa)" : "● API Conectada ao Vivo"}
+                      </span>
+                    )}
+                    {msg.autoToolBadge && (
+                      <span className="px-2 py-0.5 rounded bg-purple-950/70 text-purple-300 border border-purple-500/40 font-bold flex items-center gap-1 text-[9px] shadow-sm">
+                        <Wrench className="w-3 h-3 text-purple-400" />
+                        {msg.autoToolBadge}
                       </span>
                     )}
                   </div>

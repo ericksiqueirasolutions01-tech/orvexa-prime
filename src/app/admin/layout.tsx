@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Cpu,
   Sliders,
+  Bot,
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -38,6 +39,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navItems = [
     { label: "Visão Geral & Lucro", href: "/admin", icon: LayoutDashboard },
     { label: "Configurações de IA", href: "/admin/settings", icon: Sliders },
+    { label: "Gestão de Agentes", href: "/admin/agents", icon: Bot },
     { label: "Gestão Ilimitada de APIs", href: "/admin/api-keys", icon: Key },
     { label: "Gestão de Usuários", href: "/admin/users", icon: Users },
     { label: "Controle de Consumo", href: "/admin/usage", icon: BarChart3 },
