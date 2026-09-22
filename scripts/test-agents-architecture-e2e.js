@@ -314,3 +314,4 @@ runAgentsE2ETests().catch((err) => {
   console.error("❌ Falha nos testes de agentes:", err);
   process.exit(1);
 });
+

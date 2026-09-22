@@ -118,3 +118,4 @@ export function dispatchAutonomousAgentTool(
     diagnosticBadge: `⚡ Ferramenta Autônoma: ${chosenTool.name}`,
   };
 }
+
