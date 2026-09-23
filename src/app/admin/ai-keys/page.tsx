@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   Key,
   Calendar,
@@ -11,73 +12,85 @@ import {
   XCircle,
   RefreshCw,
   Plus,
-  Power,
   Trash2,
   Edit3,
   Layers,
   Activity,
-  Server,
   Zap,
   Cpu,
   ShieldAlert,
+  ShieldCheck,
+  TrendingUp,
+  Percent,
+  Sparkles,
+  Server,
+  ArrowRight,
+  Filter,
 } from "lucide-react";
-import { SUPPORTED_KEY_PROVIDERS } from "@/ai/keys/constants";
+import { QUOTA_SUPPORTED_PROVIDERS, USD_TO_BRL_RATE } from "@/ai/quota/constants";
 
-interface KeyContract {
+interface QuotaAccountItem {
   id: string;
   provider: string;
   providerName: string;
   providerAvatar: string;
-  name: string;
-  keyHint: string;
-  status: "ACTIVE" | "WARNING_80" | "WARNING_90" | "EXPIRED" | "INVALID_KEY" | "DISABLED" | "RATE_LIMITED";
+  providerColor: string;
+  providerAccentHex: string;
+  accountName: string;
+  apiKeyMasked: string;
+  status: "CONNECTED" | "INVALID" | "EXPIRED" | "LIMIT_REACHED";
   statusLabel: string;
-  limits: {
-    tokenLimit: number;
-    monthlyLimit: number;
-    dailyLimit: number;
-    initialBalance: number;
-    renewalDate: string | null;
-    expirationDate: string | null;
-  };
-  consumption: {
-    tokensUsed: number;
-    tokensRemaining: number;
+  hasDirectBalanceApi: boolean;
+  quota: {
+    totalQuota: number;
+    usedQuota: number;
+    remainingQuota: number;
     percentageConsumed: number;
-    costAccumulatedUsd: number;
-    costAccumulatedBrl: number;
+    quotaType: string;
   };
   validity: {
     createdAt: string;
     expirationDate: string | null;
+    renewalDate: string | null;
     daysRemaining: number | null;
     isExpiringSoon: boolean;
     isExpired: boolean;
   };
+  consumption: {
+    todayTokens: number;
+    monthTokens: number;
+    estimatedCostUsd: number;
+    estimatedCostBrl: number;
+    projectedCostUsd: number;
+    projectedCostBrl: number;
+  };
   diagnostics: {
-    lastTestedAt: string | null;
+    lastSync: string;
     lastLatencyMs: number;
     detectedModels: string[];
   };
 }
 
-interface ContractAlert {
+interface QuotaAlert {
   id: string;
-  keyId: string;
+  accountId: string;
   provider: string;
-  keyName: string;
-  type: "EXPIRES_IN_7_DAYS" | "CONSUMPTION_OVER_80" | "CONSUMPTION_OVER_90" | "INVALID_KEY";
+  accountName: string;
+  type: "CONSUMPTION_OVER_80" | "CONSUMPTION_OVER_90" | "EXPIRES_IN_7_DAYS" | "INVALID_KEY" | "LIMIT_REACHED" | "EXPIRED";
   severity: "CRITICAL" | "WARNING";
   title: string;
   message: string;
   timestamp: string;
 }
 
-export default function AiKeysManagementPage() {
+export default function AiQuotaManagerPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [keys, setKeys] = useState<KeyContract[]>([]);
-  const [alerts, setAlerts] = useState<ContractAlert[]>([]);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+
+  const [accounts, setAccounts] = useState<QuotaAccountItem[]>([]);
+  const [alerts, setAlerts] = useState<QuotaAlert[]>([]);
   const [totals, setTotals] = useState<any>(null);
 
   // Filtros
@@ -85,39 +98,36 @@ export default function AiKeysManagementPage() {
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
 
   // Estado de teste de conexão
-  const [testingKeyId, setTestingKeyId] = useState<string | null>(null);
-  const [testResultFeedback, setTestResultFeedback] = useState<Record<string, any>>({});
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testFeedback, setTestFeedback] = useState<Record<string, any>>({});
 
   // Modal de Criação / Edição
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [formFeedback, setFormFeedback] = useState<string | null>(null);
   const [formData, setFormData] = useState({
-    provider: "openai",
-    name: "",
+    provider: "mirai",
+    accountName: "",
     rawKey: "",
     customBaseUrl: "",
-    tokenLimit: 1000000,
-    monthlyLimit: 500000,
-    dailyLimit: 25000,
-    initialBalance: 1000000,
-    renewalDate: "",
+    totalQuota: 5000000,
+    quotaType: "TOKENS",
     expirationDate: "",
-    status: "ACTIVE",
+    renewalDate: "",
   });
-  const [formSaving, setFormSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/ai-keys");
       if (res.ok) {
         const data = await res.json();
-        setKeys(data.keys || []);
+        setAccounts(data.accounts || []);
         setAlerts(data.alerts || []);
         setTotals(data.totals || null);
       }
     } catch (err) {
-      console.error("Erro ao carregar contratos:", err);
+      console.error("[AiQuotaManagerPage Fetch Error]", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -128,197 +138,202 @@ export default function AiKeysManagementPage() {
     fetchData();
   }, [fetchData]);
 
-  // Testar Conexão da Chave (🧪 Testar conexão)
-  const handleTestKey = async (id: string) => {
-    setTestingKeyId(id);
+  // Sincronizar Tudo (🔄 Sincronizar agora)
+  const handleSyncAll = async () => {
+    setSyncingAll(true);
     try {
-      const res = await fetch(`/api/admin/ai-keys/${id}/test`, {
+      const res = await fetch("/api/admin/ai-keys/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.accounts) setAccounts(data.accounts);
+        await fetchData();
+      }
+    } catch (err) {
+      console.error("[Sync All Error]", err);
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
+  // Sincronizar Individual
+  const handleSyncIndividual = async (accountId: string) => {
+    setSyncingId(accountId);
+    try {
+      const res = await fetch("/api/admin/ai-keys/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId }),
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error("[Sync Individual Error]", err);
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  // Testar Conexão da Conta
+  const handleTestConnection = async (accountId: string) => {
+    setTestingId(accountId);
+    setTestFeedback((prev) => ({ ...prev, [accountId]: { loading: true } }));
+    try {
+      const res = await fetch(`/api/admin/ai-keys/${accountId}/test`, {
         method: "POST",
       });
       const data = await res.json();
-      setTestResultFeedback((prev) => ({
+      setTestFeedback((prev) => ({
         ...prev,
-        [id]: data,
+        [accountId]: {
+          loading: false,
+          success: data.success,
+          status: data.status,
+          latencyMs: data.latencyMs,
+          detectedModels: data.detectedModels,
+          message: data.message,
+        },
       }));
       await fetchData();
     } catch (err: any) {
-      setTestResultFeedback((prev) => ({
+      setTestFeedback((prev) => ({
         ...prev,
-        [id]: { success: false, message: err.message },
+        [accountId]: {
+          loading: false,
+          success: false,
+          message: err.message || "Erro no teste de conexão.",
+        },
       }));
     } finally {
-      setTestingKeyId(null);
+      setTestingId(null);
     }
   };
 
-  // Alternar ativação de chave
-  const handleToggleStatus = async (contract: KeyContract) => {
-    const newStatus = contract.status === "DISABLED" ? "ACTIVE" : "DISABLED";
+  // Excluir Conta
+  const handleDeleteAccount = async (accountId: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta conta de quota?")) return;
     try {
-      await fetch(`/api/admin/ai-keys/${contract.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      await fetchData();
-    } catch (err) {
-      console.error("Erro ao alternar status:", err);
-    }
-  };
-
-  // Excluir chave de contrato
-  const handleDeleteKey = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza que deseja excluir o contrato "${name}"?`)) return;
-
-    try {
-      await fetch(`/api/admin/ai-keys/${id}`, {
+      const res = await fetch(`/api/admin/ai-keys/${accountId}`, {
         method: "DELETE",
       });
-      await fetchData();
+      if (res.ok) {
+        await fetchData();
+      }
     } catch (err) {
-      console.error("Erro ao excluir contrato:", err);
+      console.error("[Delete Account Error]", err);
     }
   };
 
-  // Abrir modal de criação
-  const handleOpenCreateModal = () => {
-    setEditingId(null);
-    const thirtyDaysFromNow = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-    const ninetyDaysFromNow = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-
-    setFormData({
-      provider: "openai",
-      name: "OpenAI Primary Contract",
-      rawKey: "",
-      customBaseUrl: "",
-      tokenLimit: 1000000,
-      monthlyLimit: 500000,
-      dailyLimit: 25000,
-      initialBalance: 1000000,
-      renewalDate: thirtyDaysFromNow,
-      expirationDate: ninetyDaysFromNow,
-      status: "ACTIVE",
-    });
-    setFormError(null);
+  // Abrir Modal de Criação / Edição
+  const openModal = (account?: QuotaAccountItem) => {
+    setFormFeedback(null);
+    if (account) {
+      setEditingId(account.id);
+      setFormData({
+        provider: account.provider,
+        accountName: account.accountName,
+        rawKey: "",
+        customBaseUrl: "",
+        totalQuota: account.quota.totalQuota,
+        quotaType: account.quota.quotaType || "TOKENS",
+        expirationDate: account.validity.expirationDate ? account.validity.expirationDate.slice(0, 10) : "",
+        renewalDate: account.validity.renewalDate ? account.validity.renewalDate.slice(0, 10) : "",
+      });
+    } else {
+      setEditingId(null);
+      setFormData({
+        provider: "mirai",
+        accountName: "",
+        rawKey: "",
+        customBaseUrl: "",
+        totalQuota: 5000000,
+        quotaType: "TOKENS",
+        expirationDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        renewalDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      });
+    }
     setModalOpen(true);
   };
 
-  // Abrir modal de edição
-  const handleOpenEditModal = (contract: KeyContract) => {
-    setEditingId(contract.id);
-    setFormData({
-      provider: contract.provider,
-      name: contract.name,
-      rawKey: "",
-      customBaseUrl: "",
-      tokenLimit: contract.limits.tokenLimit,
-      monthlyLimit: contract.limits.monthlyLimit,
-      dailyLimit: contract.limits.dailyLimit,
-      initialBalance: contract.limits.initialBalance,
-      renewalDate: contract.limits.renewalDate ? contract.limits.renewalDate.split("T")[0] : "",
-      expirationDate: contract.limits.expirationDate ? contract.limits.expirationDate.split("T")[0] : "",
-      status: contract.status,
-    });
-    setFormError(null);
-    setModalOpen(true);
-  };
-
-  // Salvar formulário
-  const handleSaveForm = async (e: React.FormEvent) => {
+  // Salvar Formulário
+  const handleSaveAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      setFormError("Informe o nome de identificação do contrato.");
-      return;
-    }
-    if (!editingId && !formData.rawKey.trim()) {
-      setFormError("A chave secreta da API é obrigatória no cadastro inicial.");
-      return;
-    }
-
-    setFormSaving(true);
-    setFormError(null);
+    setSavingAccount(true);
+    setFormFeedback(null);
 
     try {
-      const payload: any = {
-        ...formData,
-        id: editingId || undefined,
-        rawKey: formData.rawKey.trim() || undefined,
-        customBaseUrl: formData.customBaseUrl.trim() || undefined,
-        tokenLimit: Number(formData.tokenLimit),
-        monthlyLimit: Number(formData.monthlyLimit),
-        dailyLimit: Number(formData.dailyLimit),
-        initialBalance: Number(formData.initialBalance),
-        renewalDate: formData.renewalDate ? new Date(formData.renewalDate).toISOString() : null,
-        expirationDate: formData.expirationDate ? new Date(formData.expirationDate).toISOString() : null,
-      };
-
       const res = await fetch("/api/admin/ai-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          id: editingId || undefined,
+          provider: formData.provider,
+          accountName: formData.accountName,
+          rawKey: formData.rawKey || undefined,
+          totalQuota: Number(formData.totalQuota),
+          quotaType: formData.quotaType,
+          expirationDate: formData.expirationDate || null,
+          renewalDate: formData.renewalDate || null,
+          customBaseUrl: formData.customBaseUrl || undefined,
+        }),
       });
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setModalOpen(false);
-        await fetchData();
+        setFormFeedback("✅ Conta salva e sincronizada com sucesso!");
+        setTimeout(() => {
+          setModalOpen(false);
+          fetchData();
+        }, 1000);
       } else {
-        setFormError(data.error || "Erro ao salvar contrato.");
+        setFormFeedback(`❌ ${data.error || "Erro ao salvar conta."}`);
       }
     } catch (err: any) {
-      setFormError(`Erro: ${err.message}`);
+      setFormFeedback(`❌ Erro: ${err.message}`);
     } finally {
-      setFormSaving(false);
+      setSavingAccount(false);
     }
   };
 
-  const getStatusBadge = (status: KeyContract["status"]) => {
+  // Filtros
+  const filteredAccounts = accounts.filter((acc) => {
+    if (filterProvider !== "ALL" && acc.provider !== filterProvider) return false;
+    if (filterStatus !== "ALL" && acc.status !== filterStatus) return false;
+    return true;
+  });
+
+  const getStatusBadge = (status: QuotaAccountItem["status"]) => {
     switch (status) {
-      case "ACTIVE":
+      case "CONNECTED":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            Ativa
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Conectado
           </span>
         );
-      case "WARNING_80":
+      case "INVALID":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-            <AlertTriangle className="w-2.5 h-2.5" />
-            Consumo &gt; 80%
-          </span>
-        );
-      case "WARNING_90":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-            <AlertTriangle className="w-2.5 h-2.5" />
-            Consumo &gt; 90%
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+            <span className="w-2 h-2 rounded-full bg-rose-400" />
+            Chave Inválida
           </span>
         );
       case "EXPIRED":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-500/10 text-yellow-400 border border-yellow-500/30">
-            <Clock className="w-2.5 h-2.5" />
-            Expirada
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            Expirado
           </span>
         );
-      case "INVALID_KEY":
+      case "LIMIT_REACHED":
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-            <XCircle className="w-2.5 h-2.5" />
-            Chave Inválida
-          </span>
-        );
-      case "DISABLED":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
-            Desativada
-          </span>
-        );
-      case "RATE_LIMITED":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-400 border border-purple-500/30">
-            Rate Limit (429)
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-400 border border-purple-500/30">
+            <span className="w-2 h-2 rounded-full bg-purple-400" />
+            Limite Atingido (100%)
           </span>
         );
       default:
@@ -326,34 +341,39 @@ export default function AiKeysManagementPage() {
     }
   };
 
-  const filteredKeys = keys.filter((k) => {
-    if (filterProvider !== "ALL" && k.provider !== filterProvider) return false;
-    if (filterStatus !== "ALL" && k.status !== filterStatus) return false;
-    return true;
-  });
-
   return (
     <div className="p-4 md:p-8 space-y-8 max-w-7xl mx-auto">
-      {/* HEADER */}
+      {/* HEADER PRINCIPAL */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-cyan-500/20">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-neon-cyan">
-            <Key className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
-              AI KEY MANAGEMENT
-              <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/30">
-                CONTRATOS & LIMITES
-              </span>
-            </h1>
-            <p className="text-xs md:text-sm text-slate-400 mt-0.5">
-              Controle de contratos, limites de tokens, créditos, validade e consumo real das chaves de IA.
-            </p>
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-neon-cyan">
+              <Key className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
+                AI QUOTA MANAGER
+                <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono border border-cyan-500/30">
+                  QUOTA &amp; CRÉDITOS
+                </span>
+              </h1>
+              <p className="text-xs md:text-sm text-slate-400 mt-0.5">
+                Controle em tempo real de contas contratadas, créditos, quotas de tokens, validade e projeções de consumo.
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/admin/ai-monitor"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 hover:border-cyan-500/50 shadow-neon-cyan transition-all"
+            title="Acessar Observabilidade AI Monitor"
+          >
+            <Activity className="w-3.5 h-3.5 text-cyan-400" />
+            <span>AI Monitor</span>
+          </Link>
+
           <button
             onClick={() => {
               setRefreshing(true);
@@ -361,425 +381,420 @@ export default function AiKeysManagementPage() {
             }}
             disabled={refreshing || loading}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 bg-slate-900 border border-slate-800 hover:border-cyan-500/40 hover:text-white transition-all disabled:opacity-50"
+            title="Atualizar dados da tela"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin text-cyan-400" : ""}`} />
             Atualizar
           </button>
 
           <button
-            onClick={handleOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 border border-cyan-400/40 shadow-neon-cyan transition-all"
+            onClick={handleSyncAll}
+            disabled={syncingAll}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-cyan-600 via-teal-600 to-emerald-600 hover:brightness-110 border border-cyan-400/40 shadow-neon-cyan transition-all disabled:opacity-50"
           >
-            <Plus className="w-3.5 h-3.5" />
-            Novo Contrato de Chave
+            <RefreshCw className={`w-3.5 h-3.5 ${syncingAll ? "animate-spin" : ""}`} />
+            <span>🔄 Sincronizar agora</span>
+          </button>
+
+          <button
+            onClick={() => openModal()}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-300 hover:brightness-110 shadow-sm transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Nova Conta</span>
           </button>
         </div>
       </div>
 
-      {/* TOP RESUMO METRICAS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Contratado */}
-        <div className="p-5 rounded-2xl bg-[#0A0E1A] border border-cyan-500/20 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-            <span>Tokens Contratados</span>
-            <Layers className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="text-2xl font-black text-white font-mono">
-            {totals?.totalTokensContracted ? totals.totalTokensContracted.toLocaleString() : "0"}
-          </div>
-          <div className="text-[11px] text-cyan-400/80 mt-1 font-mono">
-            {totals?.totalContracts || 0} contratos registrados
-          </div>
-        </div>
-
-        {/* Consumo Real */}
-        <div className="p-5 rounded-2xl bg-[#0A0E1A] border border-blue-500/20 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-            <span>Consumo Real</span>
-            <Activity className="w-4 h-4 text-blue-400" />
-          </div>
-          <div className="text-2xl font-black text-white font-mono">
-            {totals?.totalTokensConsumed ? totals.totalTokensConsumed.toLocaleString() : "0"}
-          </div>
-          <div className="text-[11px] text-blue-400/80 mt-1 font-mono">
-            Integrado à tabela ai_usage_logs
-          </div>
-        </div>
-
-        {/* Tokens Restantes */}
-        <div className="p-5 rounded-2xl bg-[#0A0E1A] border border-emerald-500/20 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-            <span>Tokens Restantes</span>
-            <Zap className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="text-2xl font-black text-emerald-400 font-mono">
-            {totals?.totalTokensRemaining ? totals.totalTokensRemaining.toLocaleString() : "0"}
-          </div>
-          <div className="text-[11px] text-emerald-400/80 mt-1 font-mono">
-            Saldo acumulado disponível
-          </div>
-        </div>
-
-        {/* Custo Total */}
-        <div className="p-5 rounded-2xl bg-[#0A0E1A] border border-purple-500/20 shadow-lg">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
-            <span>Custo Acumulado</span>
-            <DollarSign className="w-4 h-4 text-purple-400" />
-          </div>
-          <div className="text-2xl font-black text-white font-mono flex items-baseline gap-1.5">
-            <span>${totals?.totalCostUsd?.toFixed(2) || "0.00"}</span>
-            <span className="text-xs text-purple-400 font-semibold">
-              (R$ {totals?.totalCostBrl?.toFixed(2) || "0.00"})
-            </span>
-          </div>
-          <div className="text-[11px] text-purple-400/80 mt-1 font-mono">
-            Câmbio: R$ 5,65 / USD
-          </div>
-        </div>
-      </div>
-
-      {/* BANNER DE ALERTAS PREDITIVOS (7 DIAS, 80%, 90%, CHAVE INVÁLIDA) */}
-      {alerts.length > 0 ? (
-        <div className="p-5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-3">
-          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-            <AlertTriangle className="w-4 h-4" />
-            <span>Alertas de Contratos & Chaves ({alerts.length})</span>
+      {/* PAINEL DE ALERTA SE HOUVER CRÍTICOS */}
+      {alerts.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold font-mono uppercase tracking-wider text-amber-400">
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            Alertas Operacionais de Quotas &amp; Contratos ({alerts.length})
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {alerts.map((alert) => (
+            {alerts.map((al) => (
               <div
-                key={alert.id}
-                className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-start gap-3 text-xs"
+                key={al.id}
+                className={`p-3.5 rounded-xl border flex items-start gap-3 backdrop-blur-md transition-all ${
+                  al.severity === "CRITICAL"
+                    ? "bg-rose-950/20 border-rose-500/40 text-rose-200"
+                    : "bg-amber-950/20 border-amber-500/40 text-amber-200"
+                }`}
               >
-                <div className="mt-0.5 shrink-0">
-                  {alert.severity === "CRITICAL" ? (
-                    <XCircle className="w-4 h-4 text-rose-400" />
-                  ) : (
-                    <AlertTriangle className="w-4 h-4 text-amber-400" />
-                  )}
+                <div className={`p-1.5 rounded-lg ${al.severity === "CRITICAL" ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400"}`}>
+                  <ShieldAlert className="w-4 h-4" />
                 </div>
-                <div className="space-y-1 flex-1">
-                  <div className="font-bold text-slate-200">{alert.title}</div>
-                  <div className="text-slate-400 leading-relaxed">{alert.message}</div>
-                  <div className="text-[10px] text-slate-400 font-mono pt-1">
-                    Contrato: {alert.keyName} | Provedor: {alert.provider}
+                <div className="flex-1 text-xs">
+                  <div className="font-bold flex items-center justify-between">
+                    <span>{al.title}</span>
+                    <span className="font-mono text-[10px] opacity-70 uppercase">{al.provider}</span>
                   </div>
+                  <p className="mt-0.5 opacity-90 leading-relaxed">{al.message}</p>
                 </div>
               </div>
             ))}
           </div>
         </div>
-      ) : (
-        <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20 flex items-center gap-2.5 text-xs text-emerald-400 font-medium">
-          <CheckCircle2 className="w-4 h-4 shrink-0" />
-          <span>Todos os contratos e chaves dentro dos limites operacionais. Nenhuma expiração próxima.</span>
+      )}
+
+      {/* CARDS DE RESUMO GLOBAL */}
+      {totals && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="p-4 rounded-2xl bg-[#0B132B]/60 border border-cyan-500/20 backdrop-blur-md">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <span>QUOTA TOTAL CONTRATADA</span>
+              <Layers className="w-4 h-4 text-cyan-400" />
+            </div>
+            <div className="text-xl md:text-2xl font-black text-white mt-2">
+              {(totals.totalQuotaTokens / 1_000_000).toFixed(1)}M{" "}
+              <span className="text-xs font-normal text-slate-400">Tokens</span>
+            </div>
+            <div className="text-[11px] text-cyan-400 font-mono mt-1">
+              {totals.totalAccounts} contas cadastradas
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#0B132B]/60 border border-emerald-500/20 backdrop-blur-md">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <span>CONSUMO ACUMULADO</span>
+              <Activity className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="text-xl md:text-2xl font-black text-emerald-400 mt-2">
+              {totals.overallPercentageUsed}%{" "}
+              <span className="text-xs font-normal text-slate-400">
+                ({(totals.totalUsedTokens / 1_000_000).toFixed(2)}M)
+              </span>
+            </div>
+            <div className="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${
+                  totals.overallPercentageUsed >= 90
+                    ? "bg-rose-500"
+                    : totals.overallPercentageUsed >= 80
+                    ? "bg-amber-400"
+                    : "bg-emerald-400"
+                }`}
+                style={{ width: `${Math.min(100, totals.overallPercentageUsed)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#0B132B]/60 border border-amber-500/20 backdrop-blur-md">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <span>SALDO RESTANTE</span>
+              <Sparkles className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="text-xl md:text-2xl font-black text-amber-300 mt-2">
+              {(totals.totalRemainingTokens / 1_000_000).toFixed(2)}M
+            </div>
+            <div className="text-[11px] text-slate-400 font-mono mt-1">
+              Tokens disponíveis para roteamento
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#0B132B]/60 border border-cyan-500/20 backdrop-blur-md">
+            <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <span>CUSTO / PROJEÇÃO MENSAL</span>
+              <DollarSign className="w-4 h-4 text-cyan-400" />
+            </div>
+            <div className="text-lg md:text-xl font-black text-white mt-2">
+              ${totals.totalCostUsd.toFixed(2)}{" "}
+              <span className="text-xs text-slate-400 font-normal">
+                (R$ {totals.totalCostBrl.toFixed(2)})
+              </span>
+            </div>
+            <div className="text-[11px] text-cyan-300 font-mono mt-1">
+              Projeção: ${totals.totalProjectedUsd.toFixed(2)}
+            </div>
+          </div>
         </div>
       )}
 
       {/* BARRA DE FILTROS */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-[#0A0E1A] border border-slate-800 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-slate-400 font-semibold">Provedor:</span>
-          {["ALL", ...SUPPORTED_KEY_PROVIDERS.map((p) => p.slug)].map((slug) => {
-            const label = slug === "ALL" ? "Todos" : SUPPORTED_KEY_PROVIDERS.find((p) => p.slug === slug)?.name;
-            return (
-              <button
-                key={slug}
-                onClick={() => setFilterProvider(slug)}
-                className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                  filterProvider === slug
-                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold"
-                    : "text-slate-400 hover:text-white bg-slate-900 border border-slate-800"
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+          <span className="text-xs font-mono text-slate-400 flex items-center gap-1.5 mr-2">
+            <Filter className="w-3.5 h-3.5" />
+            Provedor:
+          </span>
+          {["ALL", "mirai", "openai", "anthropic", "google", "openrouter", "azure"].map((p) => (
+            <button
+              key={p}
+              onClick={() => setFilterProvider(p)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                filterProvider === p
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40"
+                  : "bg-slate-800/60 text-slate-400 hover:text-white"
+              }`}
+            >
+              {p === "ALL" ? "Todos" : QUOTA_SUPPORTED_PROVIDERS[p]?.name || p}
+            </button>
+          ))}
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-slate-400 font-semibold">Status:</span>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
-          >
-            <option value="ALL">Todos os Status</option>
-            <option value="ACTIVE">Ativa</option>
-            <option value="WARNING_80">Consumo &gt; 80%</option>
-            <option value="WARNING_90">Consumo &gt; 90%</option>
-            <option value="EXPIRED">Expirada</option>
-            <option value="INVALID_KEY">Chave Inválida</option>
-            <option value="DISABLED">Desativada</option>
-          </select>
+          <span className="text-xs font-mono text-slate-400">Status:</span>
+          {["ALL", "CONNECTED", "LIMIT_REACHED", "EXPIRED", "INVALID"].map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilterStatus(s)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                filterStatus === s
+                  ? "bg-slate-700 text-white font-bold"
+                  : "bg-slate-800/40 text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {s === "ALL" ? "Todos" : s === "CONNECTED" ? "Conectado" : s === "LIMIT_REACHED" ? "Limite" : s === "EXPIRED" ? "Expirado" : "Inválido"}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* GRID DE CARDS DOS PROVEDORES */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {filteredKeys.length > 0 ? (
-          filteredKeys.map((k) => {
-            const isTesting = testingKeyId === k.id;
-            const feedback = testResultFeedback[k.id];
+      {/* GRID DE CARDS DOS PROVEDORES (VISUAL AI MONITOR) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredAccounts.map((acc) => {
+          const cfg = QUOTA_SUPPORTED_PROVIDERS[acc.provider];
+          const testState = testFeedback[acc.id];
+          const isSyncing = syncingId === acc.id || syncingAll;
 
-            return (
-              <div
-                key={k.id}
-                className="p-6 rounded-2xl bg-[#0A0E1A] border border-slate-800 hover:border-cyan-500/30 transition-all flex flex-col justify-between space-y-6"
-              >
-                {/* 1. IDENTIFICAÇÃO */}
-                <div className="flex items-start justify-between gap-4">
+          return (
+            <div
+              key={acc.id}
+              className="rounded-2xl bg-[#090E1A] border border-slate-800 hover:border-cyan-500/40 transition-all flex flex-col justify-between overflow-hidden shadow-xl relative group"
+            >
+              {/* Header do Card */}
+              <div className="p-5 border-b border-slate-800/80 bg-slate-900/30">
+                <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-2xl shrink-0 shadow-inner">
-                      {k.providerAvatar}
+                    <div className="w-12 h-12 rounded-xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-2xl shadow-inner">
+                      {acc.providerAvatar}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="font-extrabold text-white text-base tracking-tight">{k.name}</h3>
-                        {getStatusBadge(k.status)}
+                        <h3 className="font-extrabold text-base text-white">{acc.providerName}</h3>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-                        <span className="font-semibold text-cyan-400">{k.providerName}</span>
-                        <span>•</span>
-                        <span className="font-mono text-slate-400">{k.keyHint}</span>
+                      <div className="text-xs text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                        <span>{acc.accountName}</span>
+                        <span className="text-slate-600">•</span>
+                        <span className="text-[11px] text-cyan-400">{acc.apiKeyMasked}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => handleToggleStatus(k)}
-                      className={`p-1.5 rounded-lg border transition-all ${
-                        k.status === "DISABLED"
-                          ? "bg-slate-900 border-slate-800 text-slate-400 hover:text-emerald-400"
-                          : "bg-slate-900 border-slate-800 text-emerald-400 hover:text-rose-400"
-                      }`}
-                      title={k.status === "DISABLED" ? "Ativar chave" : "Desativar chave"}
-                    >
-                      <Power className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleOpenEditModal(k)}
-                      className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-cyan-400 transition-all"
-                      title="Editar limites do contrato"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteKey(k.id, k.name)}
-                      className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 transition-all"
-                      title="Excluir contrato"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {getStatusBadge(acc.status)}
                 </div>
+              </div>
 
-                {/* 2. LIMITES DA API (Campos configuráveis) */}
-                <div className="p-3.5 rounded-xl bg-[#05070D] border border-slate-800/80 space-y-2 text-xs">
-                  <div className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">
-                    Limites Contratuais
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono">
-                    <div>
-                      <div className="text-[10px] text-slate-400">Total Contratado</div>
-                      <div className="font-bold text-white">
-                        {k.limits.tokenLimit > 0 ? k.limits.tokenLimit.toLocaleString() : "Ilimitado"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">Limite Mensal</div>
-                      <div className="font-bold text-white">
-                        {k.limits.monthlyLimit > 0 ? k.limits.monthlyLimit.toLocaleString() : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">Limite Diário</div>
-                      <div className="font-bold text-white">
-                        {k.limits.dailyLimit > 0 ? k.limits.dailyLimit.toLocaleString() : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400">Saldo Inicial</div>
-                      <div className="font-bold text-white">
-                        {k.limits.initialBalance > 0 ? k.limits.initialBalance.toLocaleString() : "—"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 3. CONSUMO (Tokens consumidos, restantes, % utilizado, custo acumulado) */}
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center justify-between text-[11px] font-mono">
-                    <span className="text-slate-400">Consumo Real Acumulado</span>
+              {/* Corpo do Card com os 4 Blocos Requisitados */}
+              <div className="p-5 space-y-4 flex-1 text-xs">
+                {/* 1. CRÉDITOS / QUOTA */}
+                <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
+                  <div className="flex items-center justify-between font-mono text-[11px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <Percent className="w-3.5 h-3.5 text-cyan-400" />
+                      QUOTA &amp; TOKENS
+                    </span>
                     <span className="font-bold text-white">
-                      {k.consumption.tokensUsed.toLocaleString()} /{" "}
-                      {k.limits.tokenLimit > 0 ? k.limits.tokenLimit.toLocaleString() : "Ilimitado"}
+                      {acc.quota.percentageConsumed}% utilizado
                     </span>
                   </div>
 
-                  {/* Barra de progresso */}
-                  <div className="w-full h-2 rounded-full bg-slate-900 overflow-hidden">
+                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${
-                        k.consumption.percentageConsumed >= 90
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        acc.quota.percentageConsumed >= 90
                           ? "bg-rose-500"
-                          : k.consumption.percentageConsumed >= 80
-                          ? "bg-amber-500"
-                          : "bg-cyan-500"
+                          : acc.quota.percentageConsumed >= 80
+                          ? "bg-amber-400"
+                          : "bg-gradient-to-r from-cyan-400 to-emerald-400"
                       }`}
-                      style={{ width: `${Math.min(100, k.consumption.percentageConsumed)}%` }}
-                    ></div>
+                      style={{ width: `${Math.min(100, acc.quota.percentageConsumed)}%` }}
+                    />
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-0.5">
+                  <div className="grid grid-cols-3 gap-2 text-center pt-1 font-mono text-[11px]">
                     <div>
-                      Tokens Restantes:{" "}
-                      <span className="text-emerald-400 font-bold">
-                        {k.consumption.tokensRemaining.toLocaleString()}
-                      </span>{" "}
-                      ({k.consumption.percentageConsumed}% usado)
+                      <div className="text-slate-400 text-[10px]">Total</div>
+                      <div className="font-bold text-slate-200">
+                        {(acc.quota.totalQuota / 1_000_000).toFixed(1)}M
+                      </div>
                     </div>
                     <div>
-                      Custo:{" "}
-                      <span className="text-emerald-400 font-bold">
-                        ${k.consumption.costAccumulatedUsd.toFixed(2)}
-                      </span>{" "}
-                      <span className="text-[10px] text-slate-400">
-                        (R$ {k.consumption.costAccumulatedBrl.toFixed(2)})
-                      </span>
+                      <div className="text-slate-400 text-[10px]">Consumido</div>
+                      <div className="font-bold text-emerald-400">
+                        {(acc.quota.usedQuota / 1_000_000).toFixed(2)}M
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400 text-[10px]">Restante</div>
+                      <div className="font-bold text-amber-300">
+                        {(acc.quota.remainingQuota / 1_000_000).toFixed(2)}M
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 4. VALIDADE (Data criação, expiração, dias restantes) */}
-                <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-[#05070D] border border-slate-800/80 text-xs font-mono">
-                  <div className="flex items-center gap-1.5 text-slate-400">
-                    <Calendar className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Criada: {new Date(k.validity.createdAt).toLocaleDateString("pt-BR")}</span>
+                {/* 2. CONSUMO REAL & PROJEÇÃO */}
+                <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+                  <div className="p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/80">
+                    <div className="text-slate-400 text-[10px]">Consumo Hoje</div>
+                    <div className="font-bold text-cyan-300 mt-0.5">
+                      {acc.consumption.todayTokens.toLocaleString("pt-BR")}{" "}
+                      <span className="text-[9px] text-slate-400">tk</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      Mês: {(acc.consumption.monthTokens / 1_000).toFixed(1)}k
+                    </div>
                   </div>
 
-                  {k.validity.expirationDate ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400">
-                        Expira: {new Date(k.validity.expirationDate).toLocaleDateString("pt-BR")}
-                      </span>
+                  <div className="p-2.5 rounded-xl bg-slate-900/40 border border-slate-800/80">
+                    <div className="text-slate-400 text-[10px]">Custo Estimado</div>
+                    <div className="font-bold text-white mt-0.5">
+                      ${acc.consumption.estimatedCostUsd.toFixed(3)}
+                    </div>
+                    <div className="text-[10px] text-cyan-400 mt-1">
+                      Proj: ${acc.consumption.projectedCostUsd.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. VALIDADE & DIAS RESTANTES */}
+                <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800/80 flex items-center justify-between font-mono text-[11px]">
+                  <div className="space-y-0.5">
+                    <div className="text-slate-400 text-[10px] flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-cyan-400" />
+                      Expiração: {acc.validity.expirationDate ? new Date(acc.validity.expirationDate).toLocaleDateString("pt-BR") : "Indeterminada"}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Renovação: {acc.validity.renewalDate ? new Date(acc.validity.renewalDate).toLocaleDateString("pt-BR") : "Automática"}
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    {acc.validity.daysRemaining !== null ? (
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          k.validity.isExpired
-                            ? "bg-rose-500/20 text-rose-400"
-                            : k.validity.isExpiringSoon
-                            ? "bg-amber-500/20 text-amber-400"
-                            : "bg-slate-800 text-slate-300"
+                        className={`inline-block px-2.5 py-1 rounded-lg font-bold text-xs ${
+                          acc.validity.daysRemaining <= 0
+                            ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                            : acc.validity.daysRemaining <= 7
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse"
+                            : "bg-slate-800 text-slate-200"
                         }`}
                       >
-                        {k.validity.isExpired
-                          ? "Expirada"
-                          : `${k.validity.daysRemaining} dias restantes`}
+                        {acc.validity.daysRemaining <= 0
+                          ? "Expirado"
+                          : `${acc.validity.daysRemaining} dias`}
                       </span>
-                    </div>
-                  ) : (
-                    <span className="text-slate-400 italic">Sem expiração definida</span>
-                  )}
+                    ) : (
+                      <span className="text-slate-400 text-[10px]">Sem limite</span>
+                    )}
+                  </div>
                 </div>
 
-                {/* 7. TESTE DA CHAVE (Botão: 🧪 Testar conexão) */}
-                <div className="space-y-2 pt-2 border-t border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      {k.diagnostics.lastTestedAt ? (
-                        <span>
-                          Último teste: {new Date(k.diagnostics.lastTestedAt).toLocaleTimeString("pt-BR")} (
-                          {k.diagnostics.lastLatencyMs}ms)
-                        </span>
-                      ) : (
-                        <span>Não testado recentemente</span>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => handleTestKey(k.id)}
-                      disabled={isTesting}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 transition-all disabled:opacity-50"
-                    >
-                      <span className="text-sm">🧪</span>
-                      <span>{isTesting ? "Testando..." : "Testar conexão"}</span>
-                    </button>
-                  </div>
-
-                  {/* Feedback do Teste */}
-                  {feedback && (
-                    <div
-                      className={`p-3 rounded-xl text-xs font-mono space-y-1 ${
-                        feedback.success
-                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                          : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between font-bold">
-                        <span>{feedback.success ? "✓ Conexão bem-sucedida" : "❌ Falha na conexão"}</span>
-                        <span>{feedback.latencyMs} ms</span>
-                      </div>
-                      <div className="text-[11px] text-slate-300">{feedback.message}</div>
-                      {feedback.detectedModels?.length > 0 && (
-                        <div className="text-[10px] text-cyan-400/80 pt-1">
-                          Modelos disponíveis: {feedback.detectedModels.slice(0, 4).join(", ")}
+                {/* Feedback do Teste de Conexão */}
+                {testState && (
+                  <div
+                    className={`p-2.5 rounded-xl border text-[11px] font-mono animate-in fade-in ${
+                      testState.loading
+                        ? "bg-cyan-950/20 border-cyan-500/30 text-cyan-300"
+                        : testState.success
+                        ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300"
+                        : "bg-rose-950/20 border-rose-500/30 text-rose-300"
+                    }`}
+                  >
+                    {testState.loading ? (
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                        Validando conexão e modelos disponíveis...
+                      </span>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className="font-bold flex items-center justify-between">
+                          <span>{testState.success ? "Conexão Validada" : "Falha na Conexão"}</span>
+                          {testState.latencyMs && <span>{testState.latencyMs}ms</span>}
                         </div>
-                      )}
-                    </div>
-                  )}
+                        {testState.message && <div className="text-[10px] opacity-80">{testState.message}</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Rodapé de Ações do Card */}
+              <div className="p-4 border-t border-slate-800 bg-slate-900/40 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleSyncIndividual(acc.id)}
+                    disabled={isSyncing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all font-mono text-[11px] disabled:opacity-50"
+                    title="Sincronizar saldo desta conta"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin text-cyan-400" : ""}`} />
+                    Sincronizar
+                  </button>
+
+                  <button
+                    onClick={() => handleTestConnection(acc.id)}
+                    disabled={testingId === acc.id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition-all font-mono text-[11px] disabled:opacity-50"
+                  >
+                    <Activity className={`w-3 h-3 ${testingId === acc.id ? "animate-pulse" : ""}`} />
+                    Testar
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => openModal(acc)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+                    title="Editar contrato"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteAccount(acc.id)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/20 transition-all"
+                    title="Excluir conta"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-            );
-          })
-        ) : (
-          <div className="col-span-full p-12 text-center text-slate-400 rounded-2xl bg-[#0A0E1A] border border-slate-800 space-y-3">
-            <Key className="w-10 h-10 text-cyan-500/40 mx-auto" />
-            <div className="font-bold text-white text-base">Nenhum contrato de chave encontrado</div>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Cadastre contratos com OpenAI, Mirai API, Anthropic, Gemini, OpenRouter ou Azure para controlar quotas,
-              custos e prazos de validade.
-            </p>
-            <button
-              onClick={handleOpenCreateModal}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white bg-cyan-600 hover:bg-cyan-500"
-            >
-              <Plus className="w-4 h-4" />
-              Cadastrar Primeiro Contrato
-            </button>
-          </div>
-        )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* MODAL DE CADASTRO / EDIÇÃO */}
+      {/* MODAL DE CRIAÇÃO / EDIÇÃO */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-xl rounded-2xl bg-[#0A0E1A] border border-cyan-500/30 shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-xl rounded-2xl bg-[#090E1A] border border-cyan-500/30 shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Key className="w-5 h-5 text-cyan-400" />
-                <h3 className="font-bold text-white text-base">
-                  {editingId ? "Editar Limites do Contrato" : "Novo Contrato de Chave de IA"}
-                </h3>
-              </div>
-              <button onClick={() => setModalOpen(false)} className="text-slate-400 hover:text-white p-1">
+                {editingId ? "Editar Conta de Quota" : "Cadastrar Nova Conta de API"}
+              </h2>
+              <button
+                onClick={() => setModalOpen(false)}
+                className="text-slate-400 hover:text-white text-lg font-bold p-1"
+              >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleSaveForm} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <form onSubmit={handleSaveAccount} className="p-6 space-y-4 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Provedor
-                  </label>
+                  <label className="block text-slate-300 font-medium mb-1">Provedor de IA *</label>
                   <select
                     value={formData.provider}
                     onChange={(e) => setFormData({ ...formData, provider: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-500 text-xs text-white focus:outline-none"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none"
+                    required
                   >
-                    {SUPPORTED_KEY_PROVIDERS.map((p) => (
+                    {Object.values(QUOTA_SUPPORTED_PROVIDERS).map((p) => (
                       <option key={p.slug} value={p.slug}>
                         {p.avatar} {p.name}
                       </option>
@@ -788,158 +803,115 @@ export default function AiKeysManagementPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Nome de Identificação
-                  </label>
+                  <label className="block text-slate-300 font-medium mb-1">Nome da Conta / Contrato *</label>
                   <input
                     type="text"
+                    value={formData.accountName}
+                    onChange={(e) => setFormData({ ...formData, accountName: e.target.value })}
+                    placeholder="Ex: Mirai Master Enterprise"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none"
                     required
-                    placeholder="Ex: OpenAI Contrato Anual 2026"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-500 text-xs text-white placeholder-slate-400 focus:outline-none"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Chave Secreta da API (Secret Key) {editingId && <span className="text-slate-400 lowercase">(deixe em branco para manter)</span>}
+                <label className="block text-slate-300 font-medium mb-1">
+                  Chave de API (Secret Key) {editingId && <span className="text-slate-500 font-normal">(Deixe em branco para manter)</span>}
                 </label>
                 <input
                   type="password"
-                  placeholder={editingId ? "••••••••••••••••••••••••" : "sk-..., AIzaSy..., etc."}
                   value={formData.rawKey}
                   onChange={(e) => setFormData({ ...formData, rawKey: e.target.value })}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-500 text-xs font-mono text-white placeholder-slate-400 focus:outline-none"
+                  placeholder={editingId ? "••••••••••••••••••••••••••••••••" : "sk-..."}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none font-mono"
                 />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  🔒 Criptografia AES-256-GCM com isolamento seguro no banco de dados.
+                </p>
               </div>
 
-              {(formData.provider === "mirai" ||
-                formData.provider === "openrouter" ||
-                formData.provider === "azure") && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Custom Base URL (Opcional)
-                  </label>
+                  <label className="block text-slate-300 font-medium mb-1">Quota Contratada (Tokens) *</label>
                   <input
-                    type="url"
-                    placeholder="https://api.mirai.orvexa.digital/v1"
-                    value={formData.customBaseUrl}
-                    onChange={(e) => setFormData({ ...formData, customBaseUrl: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-500 text-xs font-mono text-white placeholder-slate-400 focus:outline-none"
-                  />
-                </div>
-              )}
-
-              {/* LIMITES CONFIGURÁVEIS */}
-              <div className="p-3.5 rounded-xl bg-[#05070D] border border-slate-800 space-y-3">
-                <div className="text-[11px] font-bold text-cyan-400 uppercase font-mono tracking-wider">
-                  Configuração de Limites & Quotas
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] text-slate-300 mb-1">
-                      Total Contratado (Tokens)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.tokenLimit}
-                      onChange={(e) => setFormData({ ...formData, tokenLimit: Number(e.target.value) })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-slate-300 mb-1">
-                      Limite Mensal (Tokens)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.monthlyLimit}
-                      onChange={(e) => setFormData({ ...formData, monthlyLimit: Number(e.target.value) })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-slate-300 mb-1">
-                      Limite Diário (Tokens)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.dailyLimit}
-                      onChange={(e) => setFormData({ ...formData, dailyLimit: Number(e.target.value) })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-white"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-slate-300 mb-1">
-                      Saldo Inicial (Tokens / Crédito)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.initialBalance}
-                      onChange={(e) => setFormData({ ...formData, initialBalance: Number(e.target.value) })}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-white"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* DATAS DE VALIDADE */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Data de Renovação
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.renewalDate}
-                    onChange={(e) => setFormData({ ...formData, renewalDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none"
+                    type="number"
+                    value={formData.totalQuota}
+                    onChange={(e) => setFormData({ ...formData, totalQuota: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none font-mono"
+                    required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Data de Expiração
-                  </label>
+                  <label className="block text-slate-300 font-medium mb-1">Tipo de Quota</label>
+                  <select
+                    value={formData.quotaType}
+                    onChange={(e) => setFormData({ ...formData, quotaType: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none"
+                  >
+                    <option value="TOKENS">Tokens Contratados</option>
+                    <option value="CREDITS_USD">Créditos em Dólar (USD)</option>
+                    <option value="UNLIMITED">Ilimitada / Pós-Pago</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Data de Expiração</label>
                   <input
                     type="date"
                     value={formData.expirationDate}
                     onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Próxima Renovação</label>
+                  <input
+                    type="date"
+                    value={formData.renewalDate}
+                    onChange={(e) => setFormData({ ...formData, renewalDate: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none font-mono"
                   />
                 </div>
               </div>
 
-              {formError && (
-                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-mono">
-                  {formError}
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Base URL Customizada (Opcional - Mirai / Azure)
+                </label>
+                <input
+                  type="text"
+                  value={formData.customBaseUrl}
+                  onChange={(e) => setFormData({ ...formData, customBaseUrl: e.target.value })}
+                  placeholder="https://api.mirai.io/v1 ou endpoint Azure"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none font-mono text-xs"
+                />
+              </div>
+
+              {formFeedback && (
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono">
+                  {formFeedback}
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white"
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={formSaving}
-                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-cyan-600 hover:bg-cyan-500 border border-cyan-400/40 shadow-neon-cyan transition-all disabled:opacity-50"
+                  disabled={savingAccount}
+                  className="px-5 py-2.5 rounded-xl font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:brightness-110 shadow-neon-glow transition-all disabled:opacity-50"
                 >
-                  {formSaving ? "Salvando..." : editingId ? "Salvar Alterações" : "Cadastrar Contrato"}
+                  {savingAccount ? "Salvando..." : editingId ? "Atualizar Conta" : "Cadastrar Conta"}
                 </button>
               </div>
             </form>

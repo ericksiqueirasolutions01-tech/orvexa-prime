@@ -615,4 +615,37 @@ model AiProviderKey {
   @@map("ai_provider_keys")
 }
 
+model AiProviderAccount {
+  id               String    @id @default(uuid())
+  provider         String    // mirai, openai, anthropic, google, openrouter, azure
+  accountName      String
+  apiKeyMasked     String
+  encryptedKey     String?
+  iv               String?
+  authTag          String?
+  totalQuota       Int       @default(0) // total contratado em tokens
+  usedQuota        Int       @default(0) // tokens consumidos
+  remainingQuota   Int       @default(0) // tokens restantes
+  quotaType        String    @default("TOKENS") // TOKENS, CREDITS_USD, UNLIMITED
+  expirationDate   DateTime?
+  renewalDate      DateTime?
+  lastSync         DateTime  @default(now())
+  status           String    @default("CONNECTED") // CONNECTED, INVALID, EXPIRED, LIMIT_REACHED
+  customBaseUrl    String?
+  todayTokens      Int       @default(0)
+  monthTokens      Int       @default(0)
+  estimatedCostUsd Float     @default(0)
+  projectedCostUsd Float     @default(0)
+  detectedModels   String?   // JSON array de modelos suportados
+  lastLatencyMs    Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([provider])
+  @@index([status])
+  @@index([expirationDate])
+  @@map("ai_provider_accounts")
+}
+
+
 

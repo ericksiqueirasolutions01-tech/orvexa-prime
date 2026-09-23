@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { AiKeyManagementService } from "@/ai/keys/key-management.service";
+import { AiQuotaManagerService } from "@/ai/quota/quota-manager.service";
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -12,10 +13,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return NextResponse.json({ error: "Acesso restrito ao administrador." }, { status: 403 });
     }
 
-    const result = await AiKeyManagementService.testKeyConnection(params.id);
+    let result: any = null;
+    try {
+      result = await AiQuotaManagerService.testAccountConnection(params.id);
+    } catch {
+      // Fallback para tabela anterior ai_provider_keys se não for encontrada em accounts
+      result = await AiKeyManagementService.testKeyConnection(params.id);
+    }
 
     return NextResponse.json({
-      success: result.success,
+      success: result.status === "CONNECTED" || result.success,
       status: result.status,
       latencyMs: result.latencyMs,
       detectedModels: result.detectedModels,

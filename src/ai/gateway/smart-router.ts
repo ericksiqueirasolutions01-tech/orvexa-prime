@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { appCache } from "@/lib/cache";
+import { AiQuotaManagerService } from "@/ai/quota/quota-manager.service";
 
 export type RouterCategory =
   | "TEXTO_LONGO_DOCUMENTO"
@@ -412,6 +413,7 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
   const normalized = normalizeText(rawPrompt);
 
   const USER_FRIENDLY_BADGE = "ORVEXA escolheu a melhor IA para esta tarefa.";
+  let decision: SmartRouterDecision;
 
   // REGRA 4: Imagens e Visão Computacional -> Priorizar Gemini (Google)
   if (isImageTask(input, normalized)) {
@@ -419,7 +421,7 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       "gemini-1.5-pro",
       "gemini-1.5-flash",
     ]);
-    return {
+    decision = {
       categoria: "IMAGEM",
       provedor: "google",
       modeloIdentificador: model.identifier,
@@ -431,15 +433,13 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
-  }
-
-  // REGRA 1: Texto Longo / Documentos -> Priorizar Claude (Anthropic)
-  if (isLongTextOrDocumentTask(input, normalized)) {
+  } else if (isLongTextOrDocumentTask(input, normalized)) {
+    // REGRA 1: Texto Longo / Documentos -> Priorizar Claude (Anthropic)
     const model = await resolveModelRecord("claude-sonnet-5", "anthropic", [
       "claude-3-5-sonnet-20241022",
       "claude-opus-5",
     ]);
-    return {
+    decision = {
       categoria: "TEXTO_LONGO_DOCUMENTO",
       provedor: "anthropic",
       modeloIdentificador: model.identifier,
@@ -451,15 +451,13 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
-  }
-
-  // REGRA 2: Código e Engenharia de Software -> Priorizar GPT (OpenAI)
-  if (isCodeTask(input, normalized)) {
+  } else if (isCodeTask(input, normalized)) {
+    // REGRA 2: Código e Engenharia de Software -> Priorizar GPT (OpenAI)
     const model = await resolveModelRecord("gpt-5.6-sol", "openai", [
       "gpt-4o",
       "gpt-6-astra",
     ]);
-    return {
+    decision = {
       categoria: "CODIGO",
       provedor: "openai",
       modeloIdentificador: model.identifier,
@@ -471,15 +469,13 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
-  }
-
-  // REGRA 3: Raciocínio Matemático e Lógica -> Priorizar GPT (OpenAI)
-  if (isMathTask(normalized, rawPrompt)) {
+  } else if (isMathTask(normalized, rawPrompt)) {
+    // REGRA 3: Raciocínio Matemático e Lógica -> Priorizar GPT (OpenAI)
     const model = await resolveModelRecord("gpt-4o", "openai", [
       "gpt-5.6-sol",
       "gpt-6-astra",
     ]);
-    return {
+    decision = {
       categoria: "MATEMATICA",
       provedor: "openai",
       modeloIdentificador: model.identifier,
@@ -491,15 +487,13 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
-  }
-
-  // REGRA 5: Perguntas Simples e Rápidas -> Usar Modelo Econômico (gpt-4o-mini / gemini-3.1-flash-lite)
-  if (isSimpleQuestion(input, normalized)) {
+  } else if (isSimpleQuestion(input, normalized)) {
+    // REGRA 5: Perguntas Simples e Rápidas -> Usar Modelo Econômico (gpt-4o-mini / gemini-3.1-flash-lite)
     const model = await resolveModelRecord("gpt-4o-mini", "openai", [
       "gemini-3.1-flash-lite-preview",
       "gemini-1.5-flash",
     ]);
-    return {
+    decision = {
       categoria: "PERGUNTA_SIMPLES",
       provedor: model.provider,
       modeloIdentificador: model.identifier,
@@ -511,26 +505,56 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
+  } else {
+    // Fallback Padrão: Equilíbrio de alta qualidade com Claude Sonnet / GPT-4o
+    const defaultModel = await resolveModelRecord("claude-sonnet-5", "anthropic", [
+      "claude-3-5-sonnet-20241022",
+      "gpt-4o",
+    ]);
+    decision = {
+      categoria: "GERAL",
+      provedor: defaultModel.provider,
+      modeloIdentificador: defaultModel.identifier,
+      modeloNome: defaultModel.name,
+      modeloId: defaultModel.id,
+      motivoEscolha:
+        "Consulta balanceada de uso geral. Selecionado modelo premium para respostas consistentes e articuladas.",
+      capacidadeNecessaria: "TEXTO",
+      userBadge: USER_FRIENDLY_BADGE,
+      tempoClassificacaoMs: Date.now() - startTime,
+    };
   }
 
-  // Fallback Padrão: Equilíbrio de alta qualidade com Claude Sonnet / GPT-4o
-  const defaultModel = await resolveModelRecord("claude-sonnet-5", "anthropic", [
-    "claude-3-5-sonnet-20241022",
-    "gpt-4o",
-  ]);
+  // Resiliência AI Quota Manager: Verifica se o provedor preferencial possui saldo e validade
+  try {
+    const quotaCheck = await AiQuotaManagerService.checkProviderAvailability(decision.provedor);
+    if (!quotaCheck.available) {
+      let fallbackProvider: "anthropic" | "openai" | "google" = "openai";
+      let fallbackCandidate = "gpt-4o";
 
-  return {
-    categoria: "GERAL",
-    provedor: defaultModel.provider,
-    modeloIdentificador: defaultModel.identifier,
-    modeloNome: defaultModel.name,
-    modeloId: defaultModel.id,
-    motivoEscolha:
-      "Consulta balanceada de uso geral. Selecionado modelo premium para respostas consistentes e articuladas.",
-    capacidadeNecessaria: "TEXTO",
-    userBadge: USER_FRIENDLY_BADGE,
-    tempoClassificacaoMs: Date.now() - startTime,
-  };
+      if (decision.provedor === "openai") {
+        fallbackProvider = "anthropic";
+        fallbackCandidate = "claude-sonnet-5";
+      } else if (decision.provedor === "anthropic") {
+        fallbackProvider = "openai";
+        fallbackCandidate = "gpt-4o";
+      } else if (decision.provedor === "google") {
+        fallbackProvider = "openai";
+        fallbackCandidate = "gpt-4o";
+      }
+
+      const resolved = await resolveModelRecord(fallbackCandidate, fallbackProvider);
+      decision.motivoEscolha = `[Fallback AI Quota Manager] ${quotaCheck.reason} O Smart Router redirecionou automaticamente para ${resolved.name}.`;
+      decision.provedor = fallbackProvider;
+      decision.modeloIdentificador = resolved.identifier;
+      decision.modeloNome = resolved.name;
+      decision.modeloId = resolved.id;
+    }
+  } catch {
+    // Continua com a decisão original caso o serviço de quota não responda
+  }
+
+  return decision;
 }
 
 /**

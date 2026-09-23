@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
@@ -328,7 +329,16 @@ export default function AiMonitorPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Link
+            href="/admin/ai-keys"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 hover:border-amber-500/50 shadow-neon-amber transition-all"
+            title="Acessar Gerenciador de Quotas e Créditos de APIs"
+          >
+            <Key className="w-3.5 h-3.5 text-amber-400" />
+            <span>AI Quota Manager</span>
+          </Link>
+
           <button
             onClick={() => {
               setRefreshing(true);
