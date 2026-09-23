@@ -164,6 +164,13 @@ export default function HomePage() {
           >
             Acessar Minha Conta
           </Link>
+          <Link
+            href="/loading"
+            className="w-full sm:w-auto px-6 py-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-transparent hover:bg-white/5 text-amber-300 border border-amber-500/30 font-semibold text-base backdrop-blur-md transition-all flex items-center justify-center gap-2 shadow-sm shadow-amber-500/10 hover:border-amber-400/60"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            Experiência Cinematográfica
+          </Link>
         </div>
 
         {/* Logo Banner & Stats */}

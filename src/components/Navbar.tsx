@@ -86,6 +86,13 @@ export function Navbar() {
             <ShieldCheck className="w-4 h-4 text-slate-400" />
             Segurança
           </Link>
+          <Link
+            href="/loading"
+            className="text-sm font-medium text-amber-300/90 hover:text-amber-300 transition-colors flex items-center gap-1.5"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            Experiência
+          </Link>
         </nav>
 
         {/* Action Buttons */}
@@ -159,6 +166,14 @@ export function Navbar() {
             className="block text-slate-300 hover:text-white py-2 text-sm font-medium"
           >
             Planos de Assinatura
+          </Link>
+          <Link
+            href="/loading"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block text-amber-300 hover:text-amber-200 py-2 text-sm font-medium flex items-center gap-2"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            Experiência Cinematográfica
           </Link>
           <div className="pt-2 border-t border-slate-800 flex flex-col gap-2">
             {session ? (
