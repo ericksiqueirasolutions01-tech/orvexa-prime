@@ -584,4 +584,35 @@ model ProviderHealth {
   @@map("provider_health")
 }
 
+model AiProviderKey {
+  id              String    @id @default(uuid())
+  provider        String    // openai, mirai, anthropic, google, openrouter, azure
+  name            String
+  encryptedKey    String
+  iv              String?
+  authTag         String?
+  keyHint         String?   // ...x98a
+  tokenLimit      Int       @default(0) // total contratado
+  monthlyLimit    Int       @default(0) // limite mensal
+  dailyLimit      Int       @default(0) // limite diário
+  initialBalance  Int       @default(0) // saldo inicial
+  tokensUsed      Int       @default(0) // tokens consumidos
+  tokensRemaining Int       @default(0) // tokens restantes
+  costAccumulated Float     @default(0) // custo acumulado em USD
+  expirationDate  DateTime? // data de expiração
+  renewalDate     DateTime? // data de renovação
+  customBaseUrl   String?
+  status          String    @default("ACTIVE") // ACTIVE, DISABLED, EXPIRED, WARNING_80, WARNING_90, ERROR, RATE_LIMITED
+  lastTestedAt    DateTime?
+  lastLatencyMs   Int       @default(0)
+  detectedModels  String?   // JSON array de modelos
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([provider])
+  @@index([status])
+  @@index([expirationDate])
+  @@map("ai_provider_keys")
+}
+
 

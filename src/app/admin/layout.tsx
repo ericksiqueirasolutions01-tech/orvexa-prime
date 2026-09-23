@@ -42,6 +42,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navItems = [
     { label: "Visão Geral & Lucro", href: "/admin", icon: LayoutDashboard },
     { label: "⚡ Monitoramento IA", href: "/admin/ai-monitor", icon: Zap },
+    { label: "🔑 Contratos & Chaves IA", href: "/admin/ai-keys", icon: Key },
     { label: "Configurações de IA", href: "/admin/settings", icon: Sliders },
     { label: "Gestão de Agentes", href: "/admin/agents", icon: Bot },
     { label: "Gestão Ilimitada de APIs", href: "/admin/api-keys", icon: Key },
