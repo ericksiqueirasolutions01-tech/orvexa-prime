@@ -2,8 +2,8 @@
 // AI PROVIDER LAYER — ORVEXA PRIME DIGITAL
 // Camada central desacoplada para comunicação com múltiplos provedores e gateways compatíveis com OpenAI.
 
-import { prisma } from "@/lib/prisma";
-import { decryptApiKey } from "@/lib/crypto";
+import { prisma } from "../../lib/prisma";
+import { decryptApiKey } from "../../lib/crypto";
 import { normalizeModelIdentifier } from "../models/registry";
 import { createHighFidelitySimulatedStream } from "../gateway/fallback";
 
@@ -843,12 +843,19 @@ export class AIProviderService {
           const trimmed = line.trim();
           if (trimmed.startsWith("data: ")) {
             const dataStr = trimmed.slice(6);
-            if (dataStr === "[DONE]") return;
+            if (dataStr === "[DONE]") {
+              try { controller.terminate(); } catch {}
+              return;
+            }
             try {
               const parsed = JSON.parse(dataStr);
               const delta = parsed.choices?.[0]?.delta?.content;
               if (delta) {
                 controller.enqueue(encoder.encode(delta));
+              }
+              if (parsed.choices?.[0]?.finish_reason === "stop") {
+                try { controller.terminate(); } catch {}
+                return;
               }
             } catch {}
           }

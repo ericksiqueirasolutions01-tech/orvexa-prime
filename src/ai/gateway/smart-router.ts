@@ -384,9 +384,13 @@ async function resolveModelRecord(
   }
 
   const namesMap: Record<string, string> = {
+    "gpt-6-sol": "GPT-6 Sol",
+    "gpt-5.6-sol": "GPT-5.6 Sol (Codex)",
+    "gpt-5.6-terra": "GPT-5.6 Terra",
+    "gpt-5.6-luna": "GPT-5.6 Luna",
+    "gpt-6-astra": "GPT-6 Astra",
     "claude-sonnet-5": "Claude Sonnet 5",
     "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
-    "gpt-5.6-sol": "GPT-5.6 Sol (Codex)",
     "gpt-4o": "GPT-4o",
     "gpt-4o-mini": "GPT-4o Mini",
     "gemini-3-flash-preview": "Gemini 3 Flash",
@@ -434,26 +438,28 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       tempoClassificacaoMs: Date.now() - startTime,
     };
   } else if (isLongTextOrDocumentTask(input, normalized)) {
-    // REGRA 1: Texto Longo / Documentos -> Priorizar Claude (Anthropic)
-    const model = await resolveModelRecord("claude-sonnet-5", "anthropic", [
+    // REGRA 1: Texto Longo / Documentos -> Priorizar Modelo Especializado em Documentos
+    const model = await resolveModelRecord("gpt-5.6-terra", "openai", [
+      "claude-sonnet-5",
       "claude-3-5-sonnet-20241022",
-      "claude-opus-5",
+      "gpt-6-sol",
     ]);
     decision = {
       categoria: "TEXTO_LONGO_DOCUMENTO",
-      provedor: "anthropic",
+      provedor: model.provider,
       modeloIdentificador: model.identifier,
       modeloNome: model.name,
       modeloId: model.id,
       motivoEscolha:
-        "Texto de grande extensão ou análise documental detectado. Priorizado Claude (Anthropic) pela profundidade de interpretação e janela de contexto estendida.",
+        "Texto de grande extensão ou análise documental detectado. Priorizado modelo especializado em contexto e profundidade interpretativa.",
       capacidadeNecessaria: input.hasFiles ? "DOCUMENTO" : "TEXTO",
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
   } else if (isCodeTask(input, normalized)) {
-    // REGRA 2: Código e Engenharia de Software -> Priorizar GPT (OpenAI)
+    // REGRA 2: Código e Engenharia de Software -> Priorizar GPT-5.6 Sol / GPT (OpenAI)
     const model = await resolveModelRecord("gpt-5.6-sol", "openai", [
+      "gpt-6-sol",
       "gpt-4o",
       "gpt-6-astra",
     ]);
@@ -464,16 +470,16 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       modeloNome: model.name,
       modeloId: model.id,
       motivoEscolha:
-        "Desenvolvimento de software e engenharia de código detectados. Priorizado GPT (OpenAI) pela excelência analítica em algoritmos e sintaxe.",
+        "Desenvolvimento de software e engenharia de código detectados. Priorizado GPT Sol pela excelência analítica em algoritmos e sintaxe.",
       capacidadeNecessaria: "CODIGO",
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
   } else if (isMathTask(normalized, rawPrompt)) {
-    // REGRA 3: Raciocínio Matemático e Lógica -> Priorizar GPT (OpenAI)
-    const model = await resolveModelRecord("gpt-4o", "openai", [
+    // REGRA 3: Raciocínio Matemático e Lógica -> Priorizar GPT-6 Sol / GPT (OpenAI)
+    const model = await resolveModelRecord("gpt-6-sol", "openai", [
       "gpt-5.6-sol",
-      "gpt-6-astra",
+      "gpt-4o",
     ]);
     decision = {
       categoria: "MATEMATICA",
@@ -482,16 +488,17 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       modeloNome: model.name,
       modeloId: model.id,
       motivoEscolha:
-        "Raciocínio lógico-matemático e computacional detectado. Priorizado GPT (OpenAI) pelo rigor analítico e precisão quantitativa.",
+        "Raciocínio lógico-matemático e computacional detectado. Priorizado GPT Sol pelo rigor analítico e precisão quantitativa.",
       capacidadeNecessaria: "TEXTO",
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
     };
   } else if (isSimpleQuestion(input, normalized)) {
-    // REGRA 5: Perguntas Simples e Rápidas -> Usar Modelo Econômico (gpt-4o-mini / gemini-3.1-flash-lite)
-    const model = await resolveModelRecord("gpt-4o-mini", "openai", [
+    // REGRA 5: Perguntas Simples e Rápidas -> Usar Modelo Econômico (gpt-5.6-luna / gpt-4o-mini)
+    const model = await resolveModelRecord("gpt-5.6-luna", "openai", [
+      "gpt-4o-mini",
       "gemini-3.1-flash-lite-preview",
-      "gemini-1.5-flash",
+      "gpt-6-sol",
     ]);
     decision = {
       categoria: "PERGUNTA_SIMPLES",
@@ -506,10 +513,11 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
       tempoClassificacaoMs: Date.now() - startTime,
     };
   } else {
-    // Fallback Padrão: Equilíbrio de alta qualidade com Claude Sonnet / GPT-4o
-    const defaultModel = await resolveModelRecord("claude-sonnet-5", "anthropic", [
+    // Fallback Padrão: Equilíbrio de alta qualidade com GPT-6 Sol / Claude Sonnet
+    const defaultModel = await resolveModelRecord("gpt-6-sol", "openai", [
+      "claude-sonnet-5",
       "claude-3-5-sonnet-20241022",
-      "gpt-4o",
+      "gpt-5.6-sol",
     ]);
     decision = {
       categoria: "GERAL",

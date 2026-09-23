@@ -726,6 +726,7 @@ function createSseTransformStream(rawStream: ReadableStream<Uint8Array>): Readab
         if (trimmed.startsWith("data: ")) {
           const dataStr = trimmed.slice(6);
           if (dataStr === "[DONE]") {
+            try { controller.terminate(); } catch {}
             return;
           }
           try {
@@ -733,6 +734,10 @@ function createSseTransformStream(rawStream: ReadableStream<Uint8Array>): Readab
             const deltaText = parsed.choices?.[0]?.delta?.content;
             if (deltaText) {
               controller.enqueue(encoder.encode(deltaText));
+            }
+            if (parsed.choices?.[0]?.finish_reason === "stop") {
+              try { controller.terminate(); } catch {}
+              return;
             }
           } catch {
             // Ignore keepalive or partial json

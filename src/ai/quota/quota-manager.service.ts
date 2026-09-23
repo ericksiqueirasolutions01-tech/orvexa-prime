@@ -1,9 +1,9 @@
 // src/ai/quota/quota-manager.service.ts
 // MOTOR CENTRAL DO AI QUOTA MANAGER — ORVEXA PRIME DIGITAL
 
-import { prisma } from "@/lib/prisma";
-import { encryptApiKey, decryptApiKey } from "@/lib/crypto";
-import { AIProviderService } from "@/ai/services/provider.service";
+import { prisma } from "../../lib/prisma";
+import { encryptApiKey, decryptApiKey } from "../../lib/crypto";
+import { AIProviderService } from "../services/provider.service";
 import { QUOTA_SUPPORTED_PROVIDERS, USD_TO_BRL_RATE, QuotaProviderConfig } from "./constants";
 
 export interface QuotaAccountItem {
@@ -65,101 +65,9 @@ export class AiQuotaManagerService {
    * Inicializa contas padrão para os 6 provedores caso ainda não existam no banco
    */
   public static async ensureSeedAccounts(): Promise<void> {
-    const count = await prisma.aiProviderAccount.count();
-    if (count > 0) return;
-
-    const defaultSeedData = [
-      {
-        provider: "mirai",
-        accountName: "Mirai Enterprise Engine",
-        apiKeyMasked: "sk-mirai-...8812",
-        totalQuota: 5000000,
-        usedQuota: 1240000,
-        remainingQuota: 3760000,
-        quotaType: "TOKENS",
-        expirationDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 dias
-        renewalDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
-        status: "CONNECTED",
-        customBaseUrl: "https://api.miraiapi.com/v1",
-        detectedModels: JSON.stringify(["mirai-gpt-4o", "mirai-claude-3.5", "mirai-deepseek-v3"]),
-      },
-      {
-        provider: "openai",
-        accountName: "OpenAI Corporate Tier 4",
-        apiKeyMasked: "sk-proj-...2026",
-        totalQuota: 10000000,
-        usedQuota: 2450000,
-        remainingQuota: 7550000,
-        quotaType: "TOKENS",
-        expirationDate: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000),
-        renewalDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000),
-        status: "CONNECTED",
-        customBaseUrl: "https://api.openai.com/v1",
-        detectedModels: JSON.stringify(["gpt-4o", "gpt-4o-mini", "gpt-5.6-sol", "o1-preview"]),
-      },
-      {
-        provider: "anthropic",
-        accountName: "Anthropic Claude Scale Contrato",
-        apiKeyMasked: "sk-ant-...4491",
-        totalQuota: 8000000,
-        usedQuota: 3100000,
-        remainingQuota: 4900000,
-        quotaType: "TOKENS",
-        expirationDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
-        renewalDate: new Date(Date.now() + 22 * 24 * 60 * 60 * 1000),
-        status: "CONNECTED",
-        customBaseUrl: "https://api.anthropic.com/v1",
-        detectedModels: JSON.stringify(["claude-3-5-sonnet", "claude-sonnet-5", "claude-3-opus"]),
-      },
-      {
-        provider: "google",
-        accountName: "Google Gemini Cloud Vertex",
-        apiKeyMasked: "AIzaSy...7720",
-        totalQuota: 15000000,
-        usedQuota: 1850000,
-        remainingQuota: 13150000,
-        quotaType: "TOKENS",
-        expirationDate: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000),
-        renewalDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        status: "CONNECTED",
-        customBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-        detectedModels: JSON.stringify(["gemini-1.5-pro", "gemini-1.5-flash", "gemini-3-flash-preview"]),
-      },
-      {
-        provider: "openrouter",
-        accountName: "OpenRouter Multi-Gateway",
-        apiKeyMasked: "sk-or-v1-...9901",
-        totalQuota: 4000000,
-        usedQuota: 950000,
-        remainingQuota: 3050000,
-        quotaType: "TOKENS",
-        expirationDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
-        renewalDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
-        status: "CONNECTED",
-        customBaseUrl: "https://openrouter.ai/api/v1",
-        detectedModels: JSON.stringify(["anthropic/claude-3.5-sonnet", "openai/gpt-4o"]),
-      },
-      {
-        provider: "azure",
-        accountName: "Azure OpenAI East US",
-        apiKeyMasked: "az-op-...3310",
-        totalQuota: 6000000,
-        usedQuota: 1420000,
-        remainingQuota: 4580000,
-        quotaType: "TOKENS",
-        expirationDate: new Date(Date.now() + 75 * 24 * 60 * 60 * 1000),
-        renewalDate: new Date(Date.now() + 18 * 24 * 60 * 60 * 1000),
-        status: "CONNECTED",
-        customBaseUrl: "https://orvexa-ai.openai.azure.com",
-        detectedModels: JSON.stringify(["azure-gpt-4o", "azure-gpt-35-turbo"]),
-      },
-    ];
-
-    for (const item of defaultSeedData) {
-      await prisma.aiProviderAccount.create({
-        data: item,
-      });
-    }
+    // Modo 100% Produção Real: NUNCA gera dados fictícios ou contas mock.
+    // Todas as contas devem ser vinculadas a provedores e chaves autênticas de produção.
+    return;
   }
 
   /**
@@ -512,21 +420,49 @@ export class AiQuotaManagerService {
           } else if (resp.status === 401 || resp.status === 403) {
             newStatus = "INVALID";
           }
-        } else if (account.provider === "mirai") {
-          // Endpoint de saldo Mirai / OpenAI compatível
-          const baseUrl = account.customBaseUrl || cfg.defaultBaseUrl;
-          const resp = await fetch(`${baseUrl}/dashboard/billing/credit_grants`, {
+        } else if (account.provider === "mirai" || account.provider === "openai") {
+          // Endpoint de saldo Mirai / OpenAI compatível (subscription & usage)
+          const cleanBase = (account.customBaseUrl || cfg?.defaultBaseUrl || "https://api.miraiapi.com/v1").replace(/\/+$/, "");
+          const subUrl = cleanBase.endsWith("/v1")
+            ? `${cleanBase}/dashboard/billing/subscription`
+            : `${cleanBase}/v1/dashboard/billing/subscription`;
+          const usageUrl = cleanBase.endsWith("/v1")
+            ? `${cleanBase}/dashboard/billing/usage?start_date=2026-09-01&end_date=2026-09-30`
+            : `${cleanBase}/v1/dashboard/billing/usage?start_date=2026-09-01&end_date=2026-09-30`;
+
+          const subResp = await fetch(subUrl, {
             headers: { Authorization: `Bearer ${rawKey}` },
-          });
+          }).catch(() => null);
+
           latencyMs = Date.now() - startTime;
 
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data?.total_granted) {
-              syncedTotalQuota = Math.round(data.total_granted * 100000);
-              syncedUsedQuota = Math.round((data.total_used || 0) * 100000);
-              newStatus = "CONNECTED";
+          if (subResp && subResp.ok) {
+            const data = await subResp.json();
+            const hardLimit = data.hard_limit_usd || data.soft_limit_usd || 20;
+            // 20 USD contratados equivalem a 10.000.000 tokens na taxa base
+            syncedTotalQuota = Math.round(hardLimit * 500000);
+
+            if (data.access_until) {
+              const expDate = new Date(data.access_until * 1000);
+              await prisma.aiProviderAccount.update({
+                where: { id: account.id },
+                data: { expirationDate: expDate, renewalDate: expDate },
+              }).catch(() => {});
             }
+
+            const usageResp = await fetch(usageUrl, {
+              headers: { Authorization: `Bearer ${rawKey}` },
+            }).catch(() => null);
+
+            if (usageResp && usageResp.ok) {
+              const uData = await usageResp.json();
+              const usedCents = uData.total_usage || 0;
+              const usedUsd = usedCents / 100;
+              syncedUsedQuota = Math.round(usedUsd * 500000);
+            }
+            newStatus = "CONNECTED";
+          } else if (subResp && (subResp.status === 401 || subResp.status === 403)) {
+            newStatus = "INVALID";
           }
         }
       } catch (err) {
