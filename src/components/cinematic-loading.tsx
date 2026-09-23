@@ -536,17 +536,26 @@ export function CinematicLoading({
                   </div>
 
                   {/* Identificação Tipográfica */}
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-950/60 border border-amber-500/40 text-amber-300 font-mono text-[10px] tracking-wider uppercase">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                      Anthropic
+                      Ecossistema Claude
                     </div>
-                    <h3 className="text-lg md:text-xl font-black text-amber-100 tracking-tight">
-                      Claude 3.5 Sonnet
+                    <h3 className="text-2xl md:text-3xl font-black text-amber-100 tracking-wider">
+                      FABLE
                     </h3>
-                    <p className="text-[11px] text-amber-200/70 font-sans max-w-[180px]">
-                      Inteligência &amp; Síntese Profunda
+                    <p className="text-[11px] text-amber-200/80 font-sans font-medium">
+                      Síntese Cognitiva &amp; Linguagem
                     </p>
+                    {/* Microchips de inteligências secundárias */}
+                    <div className="flex items-center justify-center gap-1.5 pt-1">
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-950/50 border border-amber-500/30 text-amber-300/90 font-mono text-[10px] shadow-sm">
+                        ✦ Sonnet
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-950/50 border border-amber-500/30 text-amber-300/90 font-mono text-[10px] shadow-sm">
+                        ✦ Opus
+                      </span>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -556,8 +565,8 @@ export function CinematicLoading({
                     <ClaudeIcon className="w-6 h-6 text-amber-400" />
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-amber-300 font-mono">Claude 3.5</div>
-                    <div className="text-[10px] text-slate-400">Anthropic</div>
+                    <div className="text-sm font-bold text-amber-300 font-mono tracking-wide">FABLE</div>
+                    <div className="text-[10px] text-amber-400/70">Sonnet • Opus</div>
                   </div>
                 </div>
               )}
@@ -573,7 +582,7 @@ export function CinematicLoading({
                   <Sparkles className="w-10 h-10 text-white relative z-10 animate-bounce" />
                 </div>
                 <div className="font-mono text-xs font-black uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-cyan-300 drop-shadow">
-                  Fusão Central: Claude + GPT Convergindo...
+                  Fusão Neural: Fable + Astra em Convergência...
                 </div>
               </div>
             ) : scene === 3 ? (
@@ -614,17 +623,32 @@ export function CinematicLoading({
                   </div>
 
                   {/* Identificação Tipográfica */}
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 font-mono text-[10px] tracking-wider uppercase">
                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                      OpenAI
+                      Ecossistema GPT
                     </div>
-                    <h3 className="text-lg md:text-xl font-black text-cyan-100 tracking-tight">
-                      GPT-4o &amp; Codex
+                    <h3 className="text-2xl md:text-3xl font-black text-cyan-100 tracking-wider">
+                      ASTRA
                     </h3>
-                    <p className="text-[11px] text-cyan-200/70 font-sans max-w-[180px]">
-                      Engenharia Lógica &amp; Algoritmos
+                    <p className="text-[11px] text-cyan-200/80 font-sans font-medium">
+                      Engenharia Lógica &amp; Computação
                     </p>
+                    {/* Microchips de inteligências secundárias */}
+                    <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1 max-w-[210px]">
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-950/50 border border-cyan-500/30 text-cyan-300/90 font-mono text-[10px] shadow-sm">
+                        ✦ Codex
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-950/50 border border-cyan-500/30 text-cyan-300/90 font-mono text-[10px] shadow-sm">
+                        ✦ Sol
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-950/50 border border-cyan-500/30 text-cyan-300/90 font-mono text-[10px] shadow-sm">
+                        ✦ Luna
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-950/50 border border-cyan-500/30 text-cyan-300/90 font-mono text-[10px] shadow-sm">
+                        ✦ Terra
+                      </span>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -634,8 +658,8 @@ export function CinematicLoading({
                     <OpenAIIcon className="w-6 h-6 text-cyan-400" />
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-cyan-300 font-mono">GPT-4o</div>
-                    <div className="text-[10px] text-slate-400">OpenAI</div>
+                    <div className="text-sm font-bold text-cyan-300 font-mono tracking-wide">ASTRA</div>
+                    <div className="text-[10px] text-cyan-400/70">Codex • Sol • Luna • Terra</div>
                   </div>
                 </div>
               )}
@@ -659,19 +683,21 @@ export function CinematicLoading({
                 ORVEXA <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-cyan-300 to-emerald-400">PRIME</span>
               </h1>
 
-              {/* FÓRMULA DE UNIFICAÇÃO: CLAUDE + GPT = ORVEXA */}
-              <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/90 border border-slate-700/80 shadow-inner text-xs font-mono">
-                <span className="flex items-center gap-1.5 text-amber-300 font-semibold">
+              {/* FÓRMULA DE UNIFICAÇÃO: CLAUDE (Fable) + GPT (Astra) = ORVEXA */}
+              <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2 rounded-2xl bg-slate-900/90 border border-slate-700/80 shadow-2xl text-xs font-mono backdrop-blur-xl">
+                <span className="flex items-center gap-1.5 text-amber-300 font-bold">
                   <ClaudeIcon className="w-3.5 h-3.5" />
-                  Claude 3.5
+                  <span>FABLE</span>
+                  <span className="text-[10px] text-amber-400/60 font-normal hidden sm:inline">(Sonnet • Opus)</span>
                 </span>
                 <span className="text-slate-500 font-bold">+</span>
-                <span className="flex items-center gap-1.5 text-cyan-300 font-semibold">
+                <span className="flex items-center gap-1.5 text-cyan-300 font-bold">
                   <OpenAIIcon className="w-3.5 h-3.5" />
-                  GPT-4o
+                  <span>ASTRA</span>
+                  <span className="text-[10px] text-cyan-400/60 font-normal hidden sm:inline">(Codex • Sol • Luna • Terra)</span>
                 </span>
                 <span className="text-slate-500 font-bold">➔</span>
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-cyan-300 font-bold">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-cyan-300 font-extrabold tracking-wider">
                   ORVEXA PRIME
                 </span>
               </div>
@@ -685,7 +711,7 @@ export function CinematicLoading({
                 </blockquote>
 
                 <p className="text-xs md:text-sm text-slate-400 max-w-lg mx-auto leading-relaxed">
-                  OpenAI, Claude e Gemini orquestrados pelo Smart AI Router com observabilidade de custos, memória contextual e agentes especialistas.
+                  As constelações de inteligência Fable e Astra orquestradas pelo Smart AI Router com observabilidade de custos, memória contextual e agentes especialistas.
                 </p>
 
                 {/* Botões de Ação */}
