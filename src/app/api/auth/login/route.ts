@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword, createAuthToken, AUTH_COOKIE_NAME } from "@/lib/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limiter";
+import { logSecurityIncident } from "@/lib/security";
 
 export async function POST(req: Request) {
   try {
@@ -23,11 +24,18 @@ export async function POST(req: Request) {
       );
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
+      where: { email: normalizedEmail },
     });
 
     if (!user) {
+      await logSecurityIncident({
+        incidentType: "AUTH_LOGIN_FAILED",
+        ipAddress: ip,
+        severity: "LOW",
+        details: { email: normalizedEmail, reason: "Usuário não encontrado" },
+      });
       return NextResponse.json(
         { error: "Credenciais inválidas. Verifique seu e-mail e senha." },
         { status: 401 }
@@ -35,6 +43,13 @@ export async function POST(req: Request) {
     }
 
     if (user.status === "BLOCKED") {
+      await logSecurityIncident({
+        incidentType: "SECURITY_POLICY_VIOLATION",
+        actorId: user.id,
+        ipAddress: ip,
+        severity: "MEDIUM",
+        details: { email: user.email, reason: "Tentativa de login em conta bloqueada" },
+      });
       return NextResponse.json(
         { error: "Esta conta está suspensa ou bloqueada. Contate o administrador." },
         { status: 403 }
@@ -43,6 +58,13 @@ export async function POST(req: Request) {
 
     const isMatch = await verifyPassword(password, user.passwordHash);
     if (!isMatch) {
+      await logSecurityIncident({
+        incidentType: "AUTH_LOGIN_FAILED",
+        actorId: user.id,
+        ipAddress: ip,
+        severity: "LOW",
+        details: { email: user.email, reason: "Senha incorreta" },
+      });
       return NextResponse.json(
         { error: "Credenciais inválidas. Verifique seu e-mail e senha." },
         { status: 401 }

@@ -10,6 +10,7 @@ export * from "./providers/manager";
 export * from "./providers/openai";
 export * from "./providers/claude";
 export * from "./providers/google";
+export * from "./services/provider.service";
 
 export * from "./models/registry";
 

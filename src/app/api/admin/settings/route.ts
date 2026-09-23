@@ -39,6 +39,8 @@ export async function GET() {
       },
     });
 
+    const openAiProvider = providers.find((p) => p.slug === "openai");
+
     const availableModels = Object.values(MODEL_REGISTRY).map((m) => ({
       identifier: m.identifier,
       name: m.name,
@@ -53,6 +55,11 @@ export async function GET() {
         codingModel: settingsMap["coding_model"] || "gpt-5.6-sol",
         documentModel: settingsMap["document_model"] || "claude-sonnet-5",
         imageModel: settingsMap["image_model"] || "flux-ultra-8k",
+        openaiBaseUrl:
+          settingsMap["openai_base_url"] ||
+          openAiProvider?.baseUrl ||
+          process.env.OPENAI_BASE_URL ||
+          "",
       },
       providers,
       availableModels,
@@ -70,7 +77,16 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { defaultModel, codingModel, documentModel, imageModel, rawOpenAiKey, rawClaudeKey, rawGoogleKey } = body;
+    const {
+      defaultModel,
+      codingModel,
+      documentModel,
+      imageModel,
+      openaiBaseUrl,
+      rawOpenAiKey,
+      rawClaudeKey,
+      rawGoogleKey,
+    } = body;
 
     // Salva preferências de modelos padrão no SystemSetting
     const modelConfigs = [
@@ -88,6 +104,22 @@ export async function POST(req: Request) {
       });
     }
 
+    // Persiste OpenAI Base URL caso informada
+    if (openaiBaseUrl !== undefined) {
+      const cleanUrl = openaiBaseUrl ? openaiBaseUrl.trim() : "";
+      await prisma.systemSetting.upsert({
+        where: { key: "openai_base_url" },
+        update: { value: cleanUrl },
+        create: { key: "openai_base_url", value: cleanUrl, category: "AI" },
+      });
+
+      // Atualiza também o registro correspondente em AiProvider
+      await prisma.aiProvider.updateMany({
+        where: { slug: "openai" },
+        data: { baseUrl: cleanUrl || null },
+      });
+    }
+
     // Se nova chave OpenAI foi fornecida
     if (rawOpenAiKey && rawOpenAiKey.trim()) {
       const openAiProvider = await prisma.aiProvider.findUnique({ where: { slug: "openai" } });
@@ -101,6 +133,7 @@ export async function POST(req: Request) {
             iv: encrypted.iv,
             authTag: encrypted.authTag,
             keyHint: encrypted.keyHint,
+            customBaseUrl: openaiBaseUrl?.trim() || openAiProvider.baseUrl || undefined,
             status: "ACTIVE",
             priority: 1,
             capabilities: JSON.stringify(["CODIGO", "TEXTO", "CRIACAO_SITES"]),
@@ -159,4 +192,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
-

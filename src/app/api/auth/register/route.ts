@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashPassword, createAuthToken, AUTH_COOKIE_NAME } from "@/lib/auth";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limiter";
+import { validateEmail, validatePassword, sanitizeHtmlText } from "@/lib/security-validation";
 
 export async function POST(req: Request) {
   try {
@@ -23,14 +24,26 @@ export async function POST(req: Request) {
       );
     }
 
-    if (password.length < 6) {
+    // 1. Validação Segura de Formato de E-mail
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
       return NextResponse.json(
-        { error: "A senha deve ter no mínimo 6 caracteres." },
+        { error: emailValidation.reason || "E-mail inválido." },
+        { status: 400 }
+      );
+    }
+    const normalizedEmail = emailValidation.normalized!;
+
+    // 2. Validação Segura de Complexidade de Senha
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      return NextResponse.json(
+        { error: passwordValidation.reason || "Senha não atende aos requisitos de segurança." },
         { status: 400 }
       );
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    const cleanName = sanitizeHtmlText(name.trim());
 
     const existingUser = await prisma.user.findUnique({
       where: { email: normalizedEmail },

@@ -2,6 +2,8 @@ import { prisma } from "./prisma";
 import { decryptApiKey } from "./crypto";
 import { appCache } from "./cache";
 import { buildMemoryContextPrompt, extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
+import { AIProviderService } from "@/ai/services/provider.service";
+import { classifyAndRoute, logRouterDecision, SmartRouterDecision } from "@/ai/gateway/smart-router";
 
 export interface ChatMessageInput {
   role: "user" | "assistant" | "system";
@@ -16,6 +18,8 @@ export interface RouterDecision {
   modelId: string;
   reason: string;
   requiredCapability?: string; // TEXTO, CODIGO, DOCUMENTO, IMAGEM, EDICAO_IMAGEM, ANALISE_IMAGEM, CRIACAO_SITES
+  userBadge?: string;
+  smartDecision?: SmartRouterDecision;
 }
 
 export interface GatewayExecutionResult {
@@ -82,100 +86,32 @@ export function detectRequiredCapability(prompt: string, hasFiles?: boolean): st
 }
 
 /**
- * ORVEXA PRIME ENGINE: Classificador semântico de intenção, capacidades e roteador inteligente.
+ * ORVEXA SMART AI ROUTER: Classificador semântico de multicritério e roteador inteligente.
+ * Analisa pergunta, tipo de arquivo, tamanho e intenção para escolher o melhor provedor e modelo.
  */
 export async function resolveOrvexaPrimeRoute(
   userPrompt: string,
-  hasFiles: boolean = false
+  hasFiles: boolean = false,
+  options?: { fileCategory?: string | null; fileSizeBytes?: number; intent?: string | null }
 ): Promise<RouterDecision> {
-  const normalized = userPrompt.toLowerCase();
-
-  // 1. Busca regras configuradas no banco pelo Administrador (com cache L1 de 60s)
-  const rules = await appCache.getOrSet(
-    "router:active_rules",
-    async () => {
-      return prisma.routerRule.findMany({
-        where: { isActive: true },
-        include: {
-          targetProvider: true,
-          targetModel: true,
-        },
-        orderBy: { priority: "asc" },
-      });
-    },
-    60
-  );
-
-  // Se tiver anexos de arquivos ou imagens
-  if (hasFiles) {
-    const docRule = rules.find((r) => r.intentName === "DOCUMENTOS");
-    if (docRule && docRule.targetModel) {
-      return {
-        intent: "DOCUMENTOS",
-        providerSlug: docRule.targetProvider.slug,
-        modelIdentifier: docRule.targetModel.modelIdentifier,
-        modelName: docRule.targetModel.name,
-        modelId: docRule.targetModel.id,
-        reason: "Análise multimodal e processamento de arquivos",
-        requiredCapability: "DOCUMENTO",
-      };
-    }
-  }
-
-  // 2. Classificação heurística via regras do banco
-  for (const rule of rules) {
-    try {
-      const keywords: string[] = JSON.parse(rule.keywords);
-      const matches = keywords.some((kw) => normalized.includes(kw.toLowerCase()));
-      if (matches && rule.targetModel) {
-        let cap = "TEXTO";
-        if (rule.intentName === "PROGRAMACAO") cap = "CODIGO";
-        else if (rule.intentName === "DOCUMENTOS") cap = "DOCUMENTO";
-        else if (rule.intentName === "IMAGEM") cap = "IMAGEM";
-        else if (rule.intentName === "SITES") cap = "CRIACAO_SITES";
-
-        return {
-          intent: rule.intentName,
-          providerSlug: rule.targetProvider.slug,
-          modelIdentifier: rule.targetModel.modelIdentifier,
-          modelName: rule.targetModel.name,
-          modelId: rule.targetModel.id,
-          reason: `Detectada intenção "${rule.intentName}" por palavras-chave especializadas`,
-          requiredCapability: cap,
-        };
-      }
-    } catch {
-      // Ignora erro de parse da regra
-    }
-  }
-
-  // Fallback padrão: Claude 3.5 Sonnet para redação e raciocínio refinado
-  const defaultModel = await prisma.aiModel.findFirst({
-    where: { modelIdentifier: "claude-3-5-sonnet-20241022", isActive: true },
-    include: { provider: true },
+  const smartDecision = await classifyAndRoute({
+    pergunta: userPrompt,
+    hasFiles,
+    tipoArquivo: options?.fileCategory,
+    tamanho: options?.fileSizeBytes ?? userPrompt.length,
+    intencao: options?.intent,
   });
 
-  if (defaultModel) {
-    return {
-      intent: "GERAL_ASSISTENTE",
-      providerSlug: defaultModel.provider.slug,
-      modelIdentifier: defaultModel.modelIdentifier,
-      modelName: defaultModel.name,
-      modelId: defaultModel.id,
-      reason: "Roteamento balanceado padrão para tarefas gerais de alta precisão",
-      requiredCapability: "TEXTO",
-    };
-  }
-
-  // Último recurso se banco estiver vazio
   return {
-    intent: "GERAL",
-    providerSlug: "openai",
-    modelIdentifier: "gpt-4o",
-    modelName: "GPT-4o",
-    modelId: "",
-    reason: "Fallback do sistema",
-    requiredCapability: "TEXTO",
+    intent: smartDecision.categoria,
+    providerSlug: smartDecision.provedor,
+    modelIdentifier: smartDecision.modeloIdentificador,
+    modelName: smartDecision.modeloNome,
+    modelId: smartDecision.modeloId || "",
+    reason: smartDecision.motivoEscolha,
+    requiredCapability: smartDecision.capacidadeNecessaria,
+    userBadge: smartDecision.userBadge,
+    smartDecision,
   };
 }
 
@@ -360,8 +296,11 @@ export async function executeAiGatewayStream(params: {
   selectedModelPreference: string; // "orvexa-prime", "claude", "openai", "gemini" ou modelIdentifier
   systemPrompt?: string;
   hasFiles?: boolean;
+  fileCategory?: string | null;
+  fileSizeBytes?: number;
+  intent?: string | null;
 }): Promise<GatewayExecutionResult> {
-  const { userId, messages, selectedModelPreference, systemPrompt, hasFiles } = params;
+  const { userId, messages, selectedModelPreference, systemPrompt, hasFiles, fileCategory, fileSizeBytes, intent } = params;
   const lastUserMessage = messages.filter((m) => m.role === "user").slice(-1)[0]?.content || "";
 
   const ORVEXA_CORE_INSTRUCTIONS = `Você é o Assistente Executivo e Motor de Inteligência Artificial da ORVEXA PRIME DIGITAL ("Conhecimento que Transforma").
@@ -388,14 +327,18 @@ DIRETRIZES FUNDAMENTAIS:
   // Aprendizado de fatos da conversa em background
   extractAndSaveFactsFromConversation(userId, lastUserMessage).catch(() => {});
 
-  // 1. Resolve qual modelo usar (via ORVEXA PRIME ENGINE ou escolha manual)
+  // 1. Resolve qual modelo usar (via ORVEXA SMART ROUTER ENGINE ou escolha manual)
   let decision: RouterDecision;
 
   // Helper para inferir capacidade necessária
   const inferredCapability = detectRequiredCapability(lastUserMessage, hasFiles);
 
   if (selectedModelPreference === "orvexa-prime" || !selectedModelPreference) {
-    decision = await resolveOrvexaPrimeRoute(lastUserMessage, hasFiles);
+    decision = await resolveOrvexaPrimeRoute(lastUserMessage, hasFiles, {
+      fileCategory,
+      fileSizeBytes,
+      intent,
+    });
   } else if (selectedModelPreference === "claude") {
     const m = await prisma.aiModel.findFirst({
       where: { modelIdentifier: "claude-3-5-sonnet-20241022" },
@@ -532,6 +475,14 @@ DIRETRIZES FUNDAMENTAIS:
 
         // Registra log de uso assíncrono
         const latency = Date.now() - startTime;
+        if (decision.smartDecision) {
+          logRouterDecision({
+            userId,
+            pergunta: lastUserMessage,
+            decision: decision.smartDecision,
+            tempoRespostaMs: latency,
+          }).catch(() => {});
+        }
         await prisma.usageLog.create({
           data: {
             userId,
@@ -587,6 +538,14 @@ DIRETRIZES FUNDAMENTAIS:
 
         await markKeySuccess(altKey.id, estimatedInputTokens);
         const latency = Date.now() - startTime;
+        if (decision.smartDecision) {
+          logRouterDecision({
+            userId,
+            pergunta: lastUserMessage,
+            decision: decision.smartDecision,
+            tempoRespostaMs: latency,
+          }).catch(() => {});
+        }
         await prisma.usageLog.create({
           data: {
             userId,
@@ -627,6 +586,14 @@ DIRETRIZES FUNDAMENTAIS:
   });
 
   const latency = Date.now() - startTime;
+  if (decision.smartDecision) {
+    logRouterDecision({
+      userId,
+      pergunta: lastUserMessage,
+      decision: decision.smartDecision,
+      tempoRespostaMs: latency,
+    }).catch(() => {});
+  }
   await prisma.usageLog.create({
     data: {
       userId,
@@ -651,7 +618,7 @@ DIRETRIZES FUNDAMENTAIS:
 }
 
 /**
- * Chamada real aos provedores externos com suporte a streaming e Proxies
+ * Chamada real aos provedores externos com suporte a streaming via AIProviderService (AI Provider Layer)
  */
 async function callExternalProviderStream(params: {
   providerSlug: string;
@@ -661,214 +628,14 @@ async function callExternalProviderStream(params: {
   messages: ChatMessageInput[];
   systemPrompt?: string;
 }): Promise<ReadableStream<Uint8Array>> {
-  const { providerSlug, modelIdentifier, apiKey, customBaseUrl, messages, systemPrompt } = params;
-
-  const isMirai = customBaseUrl?.includes("miraiapi") || false;
-  let effectiveModel = modelIdentifier;
-
-  if (isMirai) {
-    const knownMiraiModels = [
-      "gpt-5.6-sol",
-      "gpt-5.6-terra",
-      "gpt-5.6-luna",
-      "gpt-6-astra",
-      "claude-fable-5.1",
-      "claude-fable-5",
-      "claude-sonnet-5",
-      "claude-opus-5",
-      "claude-opus-4.8",
-      "claude-opus-4.7",
-      "claude-opus-4.6",
-      "gemini-3.8",
-      "gemini-3.8-pro",
-      "gemini-2.5",
-      "gemini-1.5-pro",
-    ];
-
-    if (knownMiraiModels.includes(modelIdentifier)) {
-      effectiveModel = modelIdentifier;
-    } else if (providerSlug === "openai" || modelIdentifier.includes("gpt") || modelIdentifier.includes("codex")) {
-      effectiveModel = "gpt-5.6-sol";
-    } else if (providerSlug === "anthropic" || modelIdentifier.includes("claude") || modelIdentifier.includes("fable") || modelIdentifier.includes("sonnet")) {
-      effectiveModel = "claude-sonnet-5";
-    } else if (providerSlug === "google" || modelIdentifier.includes("gemini")) {
-      effectiveModel = "gemini-3.8";
-    }
-  }
-
-  // 1. Google Gemini Oficial (Google AI Studio)
-  if (providerSlug === "google") {
-    const contents = messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-
-    // Determina candidatos de modelo: se for antigo/descontinuado, usa gemini-3-flash-preview
-    let primaryModel = modelIdentifier;
-    const legacyGoogle = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.5-pro"];
-    if (legacyGoogle.includes(primaryModel) || !primaryModel) {
-      primaryModel = "gemini-3-flash-preview";
-    }
-
-    const candidateGoogleModels = [
-      primaryModel,
-      "gemini-3-flash-preview",
-      "gemini-3.1-flash-lite-preview",
-      "gemini-3.6-flash",
-    ].filter((v, i, a) => a.indexOf(v) === i);
-
-    let lastGoogleError: any = null;
-
-    for (const testModel of candidateGoogleModels) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(new Error("Timeout ao conectar ao Google Gemini")), 20000);
-      try {
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents,
-            systemInstruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
-            generationConfig: { maxOutputTokens: 4096 },
-          }),
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          const errText = await response.text();
-          const error: any = new Error(`Gemini API error (${testModel}): ${response.status} ${errText}`);
-          error.status = response.status;
-          lastGoogleError = error;
-
-          // Se for 503 (alta demanda) ou 404 (modelo descontinuado), tenta o próximo modelo silenciosamente
-          if (response.status === 503 || response.status === 404) {
-            console.warn(`[AI Gateway Google] Modelo ${testModel} indisponível (${response.status}), tentando modelo alternativo...`);
-            continue;
-          }
-          throw error;
-        }
-
-        return createGeminiTransformStream(response.body!);
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-        lastGoogleError = err;
-        if (err.status === 503 || err.status === 404) {
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    throw lastGoogleError || new Error(`Google Gemini indisponível no momento.`);
-  }
-
-  // 2. Anthropic Oficial (sk-ant-...) direto na API da Anthropic
-  if (providerSlug === "anthropic" && !isMirai) {
-    let endpoint = "https://api.anthropic.com/v1/messages";
-    if (customBaseUrl) {
-      const trimmed = customBaseUrl.trim().replace(/\/+$/, "");
-      endpoint = trimmed.endsWith("/messages")
-        ? trimmed
-        : trimmed.endsWith("/v1")
-        ? `${trimmed}/messages`
-        : `${trimmed}/v1/messages`;
-    }
-
-    const formattedMessages = messages.map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: m.content,
-    }));
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(new Error("Timeout ao conectar à Anthropic")), 20000);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: modelIdentifier,
-          messages: formattedMessages,
-          system: systemPrompt || undefined,
-          max_tokens: 4096,
-          stream: true,
-        }),
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errText = await response.text();
-        const error: any = new Error(`Anthropic API error: ${response.status} ${errText}`);
-        error.status = response.status;
-        throw error;
-      }
-
-      return createAnthropicTransformStream(response.body!);
-    } catch (err) {
-      clearTimeout(timeoutId);
-      throw err;
-    }
-  }
-
-  // 3. OpenAI Oficial OU Proxy OpenAI / Mirai API (OpenAI Codex ou Anthropic Claude via Mirai)
-  if (providerSlug === "openai" || isMirai || customBaseUrl) {
-    let endpoint = "https://api.openai.com/v1/chat/completions";
-    if (customBaseUrl) {
-      const trimmed = customBaseUrl.trim().replace(/\/+$/, "");
-      endpoint = trimmed.endsWith("/chat/completions")
-        ? trimmed
-        : trimmed.endsWith("/v1")
-        ? `${trimmed}/chat/completions`
-        : `${trimmed}/v1/chat/completions`;
-    }
-
-    const formattedMessages: any[] = [];
-    if (systemPrompt) {
-      formattedMessages.push({ role: "system", content: systemPrompt });
-    }
-    formattedMessages.push(...messages);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(new Error("Timeout ao conectar à OpenAI")), 20000);
-
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: effectiveModel,
-          messages: formattedMessages,
-          stream: true,
-        }),
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errText = await response.text();
-        const error: any = new Error(`API error (${endpoint}): ${response.status} ${errText}`);
-        error.status = response.status;
-        throw error;
-      }
-
-      return createSseTransformStream(response.body!);
-    } catch (err) {
-      clearTimeout(timeoutId);
-      throw err;
-    }
-  }
-
-  throw new Error(`Provedor "${providerSlug}" não suportado.`);
+  return AIProviderService.executeChatStream({
+    providerSlug: params.providerSlug,
+    modelIdentifier: params.modelIdentifier,
+    apiKey: params.apiKey,
+    customBaseUrl: params.customBaseUrl,
+    messages: params.messages,
+    systemPrompt: params.systemPrompt,
+  });
 }
 
 /**

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditEvent, verifyWebhookSignature } from "@/lib/security";
+import { logAuditEvent, logSecurityIncident, verifyWebhookSignature } from "@/lib/security";
 import { PaymentService } from "@/lib/payment-gateway";
 
 export const dynamic = "force-dynamic";
@@ -17,12 +17,34 @@ export async function POST(req: NextRequest) {
 
     const signature = req.headers.get("x-webhook-signature") || req.headers.get("stripe-signature");
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || "whsec_orvexa_prime_demo_secret_2026";
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "127.0.0.1";
 
-    // Se uma assinatura for enviada, valida criptograficamente via HMAC SHA-256
-    if (signature && signature !== "demo_mock_signature_valid") {
+    // DEFESA ATIVA: Assinatura do webhook é obrigatória contra requisições forjadas
+    if (!signature) {
+      await logSecurityIncident({
+        incidentType: "WEBHOOK_INVALID_SIGNATURE",
+        ipAddress: clientIp,
+        severity: "HIGH",
+        details: { reason: "Assinatura de webhook ausente no cabeçalho HTTP" },
+      });
+      return NextResponse.json(
+        { error: "Assinatura do webhook ausente. Acesso negado." },
+        { status: 401 }
+      );
+    }
+
+    const isTestEnvironment = process.env.NODE_ENV !== "production";
+    const isMockValid = isTestEnvironment && signature === "demo_mock_signature_valid";
+
+    if (!isMockValid) {
       const isValid = verifyWebhookSignature(rawBody, signature, webhookSecret);
       if (!isValid) {
-        console.warn("[Payment Webhook] Assinatura HMAC rejeitada.");
+        await logSecurityIncident({
+          incidentType: "WEBHOOK_INVALID_SIGNATURE",
+          ipAddress: clientIp,
+          severity: "HIGH",
+          details: { reason: "Assinatura HMAC SHA-256 inválida ou adulterada" },
+        });
         return NextResponse.json({ error: "Assinatura do webhook inválida." }, { status: 401 });
       }
     }

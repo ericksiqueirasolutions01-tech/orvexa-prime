@@ -375,7 +375,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto min-h-screen p-4 sm:p-6 lg:p-8">
+      <main className={`flex-1 overflow-y-auto min-h-screen ${pathname === "/dashboard/chat" ? "p-0 overflow-hidden h-screen" : "p-4 sm:p-6 lg:p-8"}`}>
         {children}
       </main>
     </div>

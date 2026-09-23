@@ -7,6 +7,7 @@ import { callOpenAiStream } from "./openai";
 import { callClaudeStream } from "./claude";
 import { callGoogleStream } from "./google";
 import { normalizeModelIdentifier } from "../models/registry";
+import { AIProviderService } from "../services/provider.service";
 
 export interface HealthyKey {
   id: string;
@@ -183,37 +184,13 @@ export async function dispatchProviderStream(params: {
   messages: Array<{ role: string; content: string }>;
   systemPrompt?: string;
 }): Promise<ReadableStream<Uint8Array>> {
-  const { providerSlug, modelIdentifier, apiKey, customBaseUrl, messages, systemPrompt } = params;
-
-  if (providerSlug === "google") {
-    return callGoogleStream({
-      apiKey,
-      modelIdentifier,
-      messages,
-      systemPrompt,
-    });
-  }
-
-  if (providerSlug === "anthropic") {
-    return callClaudeStream({
-      apiKey,
-      modelIdentifier,
-      messages,
-      customBaseUrl,
-      systemPrompt,
-    });
-  }
-
-  if (providerSlug === "openai") {
-    return callOpenAiStream({
-      apiKey,
-      modelIdentifier: normalizeModelIdentifier(modelIdentifier),
-      messages: messages as any,
-      customBaseUrl,
-      systemPrompt,
-    });
-  }
-
-  throw new Error(`Provedor "${providerSlug}" não suportado.`);
+  return AIProviderService.executeChatStream({
+    providerSlug: params.providerSlug,
+    modelIdentifier: params.modelIdentifier,
+    apiKey: params.apiKey,
+    customBaseUrl: params.customBaseUrl,
+    messages: params.messages as any,
+    systemPrompt: params.systemPrompt,
+  });
 }
 

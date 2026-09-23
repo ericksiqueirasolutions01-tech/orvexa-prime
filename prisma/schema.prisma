@@ -28,6 +28,8 @@ model User {
   auditLogs     AuditLog[]
   generatedImages GeneratedImage[]
   projects        Project[]
+  projectFiles    ProjectFile[]
+  projectMemories ProjectMemory[]
   memories        UserMemory[]
   agentMemories   AgentMemory[]
   conversationMemories ConversationMemory[]
@@ -231,11 +233,15 @@ model Conversation {
 
   user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   agent           Agent?      @relation(fields: [agentId], references: [id])
+  projectId       String?
+  project         Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectConversations ProjectConversation[]
   messages        Message[]
   files           File[]
   memories        ConversationMemory[]
 
   @@index([userId])
+  @@index([projectId])
   @@index([createdAt])
 }
 
@@ -363,20 +369,75 @@ model GeneratedImage {
 }
 
 model Project {
-  id          String    @id @default(uuid())
-  userId      String
-  name        String
-  slug        String
-  segment     String    // LOJA, CLINICA, RESTAURANTE, IGREJA, ADVOGADO, PETSHOP, LANDING
-  description String?
-  layoutData  String?   // JSON representation of site layout & blocks
-  status      String    @default("DRAFT") // DRAFT, GENERATING, PUBLISHED
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                  String                @id @default(uuid())
+  userId              String
+  name                String
+  slug                String?
+  segment             String?               @default("GENERAL") // LOJA, CLINICA, RESTAURANTE, IGREJA, ADVOGADO, PETSHOP, LANDING, GENERAL
+  description         String?
+  customInstructions  String?               // Instruções personalizadas do projeto e tom de voz
+  layoutData          String?               // JSON representation of site layout & blocks
+  status              String                @default("ACTIVE") // ACTIVE, DRAFT, GENERATING, PUBLISHED, ARCHIVED
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files               ProjectFile[]
+  memories            ProjectMemory[]
+  conversations       Conversation[]
+  projectConversations ProjectConversation[]
 
   @@index([userId])
+  @@index([status])
+}
+
+model ProjectFile {
+  id             String       @id @default(uuid())
+  projectId      String
+  userId         String
+  fileName       String
+  fileSize       Int          @default(0)
+  fileType       String?
+  fileUrl        String?
+  extractedText  String?
+  createdAt      DateTime     @default(now())
+
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+model ProjectMemory {
+  id             String       @id @default(uuid())
+  projectId      String
+  userId         String
+  key            String?      // e.g. "tom_de_comunicacao", "ramo_atuacao", "clientes_principais"
+  content        String       // Conteúdo da informação importante memorizada
+  category       String       @default("CONTEXT") // CONTEXT, RULE, FACT, PREFERENCE
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+model ProjectConversation {
+  id             String       @id @default(uuid())
+  projectId      String
+  conversationId String
+  createdAt      DateTime     @default(now())
+
+  project        Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, conversationId])
+  @@index([projectId])
+  @@index([conversationId])
 }
 
 model Template {

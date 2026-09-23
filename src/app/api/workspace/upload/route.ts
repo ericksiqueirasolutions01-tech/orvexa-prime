@@ -6,6 +6,12 @@ import { extractTextFromFileBuffer } from "@/ai/tools/files";
 import { categorizeFileName } from "@/ai/tools/file-generator";
 import { checkUserStorageQuota } from "@/lib/plan-limits";
 import { assertCanUploadFile } from "@/lib/consumption";
+import {
+  sanitizeFileName,
+  isAllowedFileExtension,
+  MAX_FILE_SIZE_BYTES,
+} from "@/lib/security-validation";
+import { logSecurityIncident } from "@/lib/security";
 
 export const runtime = "nodejs";
 
@@ -15,6 +21,11 @@ export async function POST(req: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
     }
+
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+      req.headers.get("x-real-ip") ||
+      "127.0.0.1";
 
     const formData = await req.formData();
     const conversationId = (formData.get("conversationId") as string) || null;
@@ -39,7 +50,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Nenhum arquivo válido foi enviado." }, { status: 400 });
     }
 
-    // 1. Verificação Centralizada de Quota de Armazenamento e Quantidade de Arquivos
+    // 1. Validação de Segurança dos Arquivos (Extensão, Tamanho e Path Traversal)
+    for (const file of files) {
+      // 1.1 Teto máximo individual de tamanho (25 MB)
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        return NextResponse.json(
+          {
+            error: `O arquivo "${file.name}" excede o tamanho máximo individual permitido de 25 MB.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // 1.2 Verificação de Extensões Seguras e Bloqueio de Executáveis
+      const extCheck = isAllowedFileExtension(file.name);
+      if (!extCheck.allowed) {
+        await logSecurityIncident({
+          incidentType: "MALICIOUS_UPLOAD_ATTEMPT",
+          actorId: session.id,
+          ipAddress: clientIp,
+          severity: "HIGH",
+          details: { fileName: file.name, extension: extCheck.extension, reason: extCheck.reason },
+        });
+        return NextResponse.json(
+          { error: `Upload bloqueado: ${extCheck.reason}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 2. Verificação Centralizada de Quota de Armazenamento e Quantidade de Arquivos
     const incomingBytes = files.reduce((acc, f) => acc + f.size, 0);
 
     const fileGuard = await assertCanUploadFile(session.id, incomingBytes);
@@ -68,20 +108,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Processamento e Persistência de Cada Arquivo
+    // 3. Processamento e Persistência de Cada Arquivo com Sanitização Rígida
     const createdFiles: any[] = [];
 
     for (const file of files) {
+      const sanitizedName = sanitizeFileName(file.name);
       const buffer = Buffer.from(await file.arrayBuffer());
-      const analysis = await extractTextFromFileBuffer(file.name, buffer, file.type);
-      const category = categorizeFileName(file.name, file.type);
+      const analysis = await extractTextFromFileBuffer(sanitizedName, buffer, file.type);
+      const category = categorizeFileName(sanitizedName, file.type);
 
       const saved = await prisma.file.create({
         data: {
           userId: session.id,
           conversationId,
-          originalName: file.name,
-          storedPath: `/uploads/${session.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`,
+          originalName: sanitizedName,
+          storedPath: `/uploads/${session.id}/${Date.now()}-${sanitizedName}`,
           fileSizeBytes: file.size,
           mimeType: file.type || "application/octet-stream",
           category,

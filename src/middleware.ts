@@ -1,3 +1,4 @@
+// src/middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
@@ -42,7 +43,9 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 1. Rate Limiting em Rotas Críticas de API
+  // ==========================================
+  // 1. RATE LIMITING EM ROTAS CRÍTICAS DE API
+  // ==========================================
   if (pathname.startsWith("/api/auth/login") || pathname.startsWith("/api/auth/register")) {
     const rateCheck = checkRateLimit(clientIp, "AUTH");
     if (!rateCheck.allowed) {
@@ -50,6 +53,21 @@ export async function middleware(req: NextRequest) {
       const res = NextResponse.json(
         {
           error: `Muitas tentativas de autenticação. Tente novamente em ${rateCheck.retryAfterSeconds} segundos.`,
+          code: "RATE_LIMIT_EXCEEDED",
+          retryAfter: rateCheck.retryAfterSeconds,
+        },
+        { status: 429, headers }
+      );
+      return applySecurityHeaders(res);
+    }
+  } else if (pathname === "/api/workspace/upload") {
+    const identifier = session?.id || clientIp;
+    const rateCheck = checkRateLimit(identifier, "FILE_UPLOAD");
+    if (!rateCheck.allowed) {
+      const headers = getRateLimitHeaders(rateCheck);
+      const res = NextResponse.json(
+        {
+          error: `Limite de upload excedido temporariamente. Aguarde ${rateCheck.retryAfterSeconds} segundos.`,
           code: "RATE_LIMIT_EXCEEDED",
           retryAfter: rateCheck.retryAfterSeconds,
         },
@@ -74,7 +92,36 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 2. Rotas restritas de Administrador
+  // ==========================================
+  // 2. PROTEÇÃO DE ROTAS DE API ADMINISTRATIVAS
+  // ==========================================
+  if (pathname.startsWith("/api/admin")) {
+    if (!session) {
+      return applySecurityHeaders(
+        NextResponse.json({ error: "Acesso não autorizado. Autenticação requerida." }, { status: 401 })
+      );
+    }
+    if (session.role !== "ADMIN") {
+      return applySecurityHeaders(
+        NextResponse.json({ error: "Acesso negado. Privilégios de Administrador requeridos." }, { status: 403 })
+      );
+    }
+  }
+
+  // ==========================================
+  // 3. PROTEÇÃO DE ROTAS DE API DO USUÁRIO & WORKSPACE
+  // ==========================================
+  if (pathname.startsWith("/api/workspace") || pathname.startsWith("/api/user")) {
+    if (!session) {
+      return applySecurityHeaders(
+        NextResponse.json({ error: "Acesso não autorizado. Faça login para continuar." }, { status: 401 })
+      );
+    }
+  }
+
+  // ==========================================
+  // 4. TELAS ADMINISTRATIVAS (FRONTEND)
+  // ==========================================
   if (pathname.startsWith("/admin")) {
     if (!session || session.role !== "ADMIN") {
       const loginUrl = new URL("/login", req.url);
@@ -84,7 +131,9 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 3. Rotas de Dashboard de Cliente
+  // ==========================================
+  // 5. TELAS DE DASHBOARD DE CLIENTE
+  // ==========================================
   if (pathname.startsWith("/dashboard")) {
     if (!session) {
       const loginUrl = new URL("/login", req.url);
@@ -108,7 +157,9 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 4. Redirecionamento se já logado
+  // ==========================================
+  // 6. REDIRECIONAMENTO SE JÁ LOGADO
+  // ==========================================
   if ((pathname === "/login" || pathname === "/register") && session) {
     if (session.role === "ADMIN") {
       return applySecurityHeaders(NextResponse.redirect(new URL("/admin", req.url)));
@@ -126,8 +177,6 @@ export const config = {
     "/dashboard/:path*",
     "/login",
     "/register",
-    "/api/auth/login",
-    "/api/auth/register",
-    "/api/ai/:path*",
+    "/api/:path*",
   ],
 };

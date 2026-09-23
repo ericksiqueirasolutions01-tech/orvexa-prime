@@ -30,7 +30,11 @@ export async function POST(req: Request) {
       conversationId,
       modelPreference = "orvexa-prime",
       agentId,
+      projectId,
       hasFiles = false,
+      fileCategory,
+      fileSizeBytes,
+      intent,
     } = await req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -186,6 +190,7 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
 
     // 3. Salva ou atualiza a conversa e a mensagem do usuário com validação de FK
     let activeConvId = conversationId;
+    let existingConvProjectId: string | null = null;
 
     // Validação estrita: se activeConvId foi enviado, confirma que existe no banco
     if (activeConvId) {
@@ -194,19 +199,102 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
       });
       if (!existingConv) {
         activeConvId = null;
+      } else {
+        existingConvProjectId = existingConv.projectId;
       }
     }
+
+    const effectiveProjectId = projectId || existingConvProjectId || null;
 
     if (!activeConvId) {
       const newConv = await prisma.conversation.create({
         data: {
           userId: session.id,
           agentId: resolvedAgentId,
+          projectId: effectiveProjectId,
           title: lastUserMessage ? lastUserMessage.content.slice(0, 45) + "..." : "Nova Conversa",
           modelPreference: effectiveModelPreference,
         },
       });
       activeConvId = newConv.id;
+
+      if (effectiveProjectId) {
+        await prisma.projectConversation.create({
+          data: {
+            projectId: effectiveProjectId,
+            conversationId: activeConvId,
+          },
+        }).catch(() => {});
+      }
+    }
+
+    // 3.1 Injeção de Contexto do Projeto e Memória Contextual
+    if (effectiveProjectId) {
+      const project = await prisma.project.findFirst({
+        where: { id: effectiveProjectId, userId: session.id },
+        include: {
+          memories: { orderBy: { createdAt: "desc" }, take: 25 },
+          files: { orderBy: { createdAt: "desc" }, take: 10 },
+        },
+      });
+
+      if (project) {
+        const projectContextParts: string[] = [];
+        projectContextParts.push(`[ESPAÇO DE TRABALHO / PROJETO ATIVO: "${project.name}"]`);
+        if (project.description) {
+          projectContextParts.push(`Descrição do Projeto: ${project.description}`);
+        }
+        if (project.customInstructions) {
+          projectContextParts.push(`INSTRUÇÕES PERSONALIZADAS DO PROJETO:\n${project.customInstructions}`);
+        }
+        if (project.memories.length > 0) {
+          projectContextParts.push(
+            `MEMÓRIA CONTEXTUAL DO PROJETO:\n${project.memories.map((m) => `• ${m.content}`).join("\n")}`
+          );
+        }
+        if (project.files.length > 0) {
+          const filesSummary = project.files
+            .map((f) => `• [Arquivo: ${f.fileName}]: ${f.extractedText ? f.extractedText.slice(0, 800) : "anexado ao projeto"}`)
+            .join("\n");
+          projectContextParts.push(`ARQUIVOS VINCULADOS AO PROJETO:\n${filesSummary}`);
+        }
+        projectContextParts.push(
+          `DIRETRIZ OBRIGATÓRIA DO PROJETO:\nTodas as suas respostas neste projeto devem obrigatoriamente respeitar a memória contextual, o tom de voz e as diretrizes acima estabelecidas.`
+        );
+
+        systemPrompt = [projectContextParts.join("\n\n"), systemPrompt].filter(Boolean).join("\n\n");
+
+        // Detecção conversacional de gravação na memória (ex: "Guarde que...", "Lembre-se que...")
+        if (lastUserMessage) {
+          const userText = lastUserMessage.content.trim();
+          const memoryTriggers = [
+            /^(?:guarde|salve|lembre-se|lembre|grave|anote|registre)\s+(?:que|de que|isso:?)\s+(.+)/i,
+            /(?:guarde|salve|lembre-se|lembre|grave|anote|registre)\s+na\s+mem[óo]ria(?:\s+do\s+projeto)?(?::|\s+que|\s+de que|\s+isso:?)\s*(.+)/i,
+          ];
+
+          let extractedMemory: string | null = null;
+          for (const regex of memoryTriggers) {
+            const m = userText.match(regex);
+            if (m && m[1]) {
+              extractedMemory = m[1].trim();
+              break;
+            }
+          }
+
+          if (extractedMemory) {
+            await prisma.projectMemory.create({
+              data: {
+                projectId: effectiveProjectId,
+                userId: session.id,
+                content: extractedMemory,
+                category: "CONTEXT",
+              },
+            }).catch(() => {});
+
+            systemPrompt += `\n\n[AVISO DE SISTEMA]: O usuário solicitou explicitamente registrar na memória contextual deste projeto o seguinte fato: "${extractedMemory}". Confirme com naturalidade e clareza que essa informação foi memorizada com sucesso para o projeto.`;
+          }
+        }
+      }
     }
 
     if (lastUserMessage) {
@@ -244,7 +332,7 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
       }
     }
 
-    // 5. Executa chamada no AI Gateway com failover e balanceamento
+    // 5. Executa chamada no AI Gateway com Smart Router, failover e balanceamento
     const gatewayResult = await executeAiGatewayStream({
       userId: session.id,
       userRole: session.role,
@@ -252,7 +340,13 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
       selectedModelPreference: effectiveModelPreference,
       systemPrompt,
       hasFiles,
+      fileCategory,
+      fileSizeBytes,
+      intent,
     });
+
+    const isOrvexaAuto = effectiveModelPreference === "orvexa-prime" || !effectiveModelPreference;
+    const routerBadge = isOrvexaAuto ? "ORVEXA escolheu a melhor IA para esta tarefa." : "";
 
     // Retorna streaming com headers diagnósticos do Gateway
     return new Response(gatewayResult.stream, {
@@ -261,8 +355,10 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "x-orvexa-conversation-id": activeConvId,
+        "x-orvexa-project-id": effectiveProjectId || "",
         "x-orvexa-intent": gatewayResult.decision.intent,
-        "x-orvexa-model": gatewayResult.decision.modelName,
+        "x-orvexa-model": isOrvexaAuto ? "ORVEXA AUTO" : gatewayResult.decision.modelName,
+        "x-orvexa-router-badge": routerBadge ? encodeURIComponent(routerBadge) : "",
         "x-orvexa-failover": gatewayResult.isFailover ? "true" : "false",
         "x-orvexa-key-status": gatewayResult.apiKeyName?.includes("Fallback") ? "fallback" : "live",
         "x-orvexa-auto-tool": autoToolBadge ? encodeURIComponent(autoToolBadge) : "",
