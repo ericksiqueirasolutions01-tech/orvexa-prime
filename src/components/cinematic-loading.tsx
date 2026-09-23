@@ -5,11 +5,60 @@ import Image from "next/image";
 import Link from "next/link";
 import { Sparkles, ArrowRight, RotateCcw, Volume2, VolumeX, Shield, Play } from "lucide-react";
 
+// Ícone Oficial Stylized Anthropic Claude
+function ClaudeIcon({ className = "w-6 h-6", glow = false }: { className?: string; glow?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      fill="currentColor"
+      className={`${className} ${glow ? "drop-shadow-[0_0_14px_rgba(245,158,11,0.85)]" : ""}`}
+    >
+      <defs>
+        <linearGradient id="claudeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#F59E0B" />
+          <stop offset="50%" stopColor="#FB923C" />
+          <stop offset="100%" stopColor="#EA580C" />
+        </linearGradient>
+      </defs>
+      <g fill="url(#claudeGrad)">
+        <rect x="43" y="10" width="14" height="80" rx="7" />
+        <rect x="43" y="10" width="14" height="80" rx="7" transform="rotate(90 50 50)" />
+        <rect x="43" y="10" width="14" height="80" rx="7" transform="rotate(45 50 50)" />
+        <rect x="43" y="10" width="14" height="80" rx="7" transform="rotate(135 50 50)" />
+      </g>
+    </svg>
+  );
+}
+
+// Ícone Oficial OpenAI GPT-4o
+function OpenAIIcon({ className = "w-6 h-6", glow = false }: { className?: string; glow?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={`${className} ${glow ? "drop-shadow-[0_0_14px_rgba(6,182,212,0.85)]" : ""}`}
+    >
+      <defs>
+        <linearGradient id="openaiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#10B981" />
+          <stop offset="50%" stopColor="#06B6D4" />
+          <stop offset="100%" stopColor="#38BDF8" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.8956zm16.0993 3.8558L12.5973 8.3829l2.02-1.1685a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.4022-.6813zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.407 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813v6.7227zm1.145-2.0728l2.5485-1.4678 2.5485 1.4678v2.9356l-2.5485 1.4678-2.5485-1.4678z"
+        fill="url(#openaiGrad)"
+      />
+    </svg>
+  );
+}
+
 interface CinematicLoadingProps {
   onComplete?: () => void;
   autoRedirectUrl?: string;
   autoRedirectDelayMs?: number;
   showNavigationControls?: boolean;
+  defaultVisualMode?: "cinematic" | "subtle";
 }
 
 export function CinematicLoading({
@@ -17,11 +66,14 @@ export function CinematicLoading({
   autoRedirectUrl = "/dashboard/chat",
   autoRedirectDelayMs = 2000,
   showNavigationControls = true,
+  defaultVisualMode = "cinematic",
 }: CinematicLoadingProps) {
   // Cenas: 1 (Origem), 2 (Claude), 3 (GPT), 4 (Fusão), 5 (Logo ORVEXA), 6 (Manifesto & Final)
   const [scene, setScene] = useState<number>(1);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [completed, setCompleted] = useState<boolean>(false);
+  // Opção A: Símbolos discretos | Opção B: Símbolos cinematográficos com auréolas (Recomendada)
+  const [visualMode, setVisualMode] = useState<"cinematic" | "subtle">(defaultVisualMode);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -388,6 +440,33 @@ export function CinematicLoading({
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Seletor de Opções Visuais A / B */}
+          <div className="flex items-center p-1 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] font-sans">
+            <button
+              onClick={() => setVisualMode("subtle")}
+              className={`px-2.5 py-1 rounded-lg transition-all ${
+                visualMode === "subtle"
+                  ? "bg-slate-800 text-amber-300 font-semibold shadow-inner"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              title="Opção A: Símbolos menores e discretos"
+            >
+              Opção A
+            </button>
+            <button
+              onClick={() => setVisualMode("cinematic")}
+              className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                visualMode === "cinematic"
+                  ? "bg-gradient-to-r from-amber-500/20 via-cyan-500/20 to-emerald-500/20 text-cyan-300 font-bold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+              title="Opção B: Símbolos mais visíveis e cinematográficos (Recomendada)"
+            >
+              <Sparkles className="w-3 h-3 text-cyan-400" />
+              <span>Opção B</span>
+            </button>
+          </div>
+
           {/* Controle de Som */}
           <button
             onClick={() => {
@@ -414,7 +493,7 @@ export function CinematicLoading({
       </header>
 
       {/* ÁREA CENTRAL: O PALCO DAS 6 CENAS */}
-      <main className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-4">
+      <main className="relative z-20 flex-1 flex flex-col items-center justify-center text-center px-4 w-full max-w-5xl mx-auto">
         {/* CENA 1: ORIGEM */}
         {scene === 1 && (
           <div className="space-y-4 animate-in fade-in duration-1000">
@@ -429,54 +508,137 @@ export function CinematicLoading({
           </div>
         )}
 
-        {/* CENA 2: ENTRADA CLAUDE (Laranja/Dourado) */}
-        {scene === 2 && (
-          <div className="absolute left-6 md:left-24 max-w-xs text-left space-y-2 animate-in slide-in-from-left duration-700">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-[0_0_12px_#F59E0B]"></span>
-              <span className="font-mono text-xs uppercase tracking-wider text-amber-300 font-bold">
-                Anthropic Claude
-              </span>
-            </div>
-            <h2 className="text-xl md:text-2xl font-black text-amber-100 tracking-tight">
-              Inteligência, Síntese &amp; Raciocínio Profundo
-            </h2>
-            <p className="text-xs text-amber-200/70 font-sans leading-relaxed">
-              Interpretação documental de alta precisão e processamento semântico contextual.
-            </p>
-          </div>
-        )}
+        {/* CENAS 2, 3 e 4: AS INTELIGÊNCIAS SEPARADAS E DEPOIS CONVERGINDO */}
+        {scene >= 2 && scene <= 4 && (
+          <div className="relative w-full flex items-center justify-center min-h-[320px]">
+            {/* CLAUDE (Anthropic) - Laranja/Dourado */}
+            <div
+              className={`absolute transition-all duration-1000 ease-in-out flex flex-col items-center text-center z-20 ${
+                scene === 2
+                  ? "-translate-x-24 sm:-translate-x-44 md:-translate-x-64 opacity-100 scale-100"
+                  : scene === 3
+                  ? "-translate-x-24 sm:-translate-x-44 md:-translate-x-64 opacity-100 scale-100"
+                  : "translate-x-0 opacity-70 scale-90" // Cena 4: converge para o centro
+              }`}
+            >
+              {visualMode === "cinematic" ? (
+                /* OPÇÃO B: Cinematográfica, volumétrica e impactante */
+                <div className="relative flex flex-col items-center space-y-3">
+                  {/* Auréola & Plasma Dourado */}
+                  <div className="absolute -inset-4 bg-gradient-to-r from-amber-500/30 via-orange-500/20 to-amber-600/30 rounded-full blur-xl animate-pulse pointer-events-none" />
 
-        {/* CENA 3: ENTRADA GPT (Verde/Turquesa) */}
-        {scene === 3 && (
-          <div className="absolute right-6 md:right-24 max-w-xs text-right space-y-2 animate-in slide-in-from-right duration-700">
-            <div className="flex items-center justify-end gap-2">
-              <span className="font-mono text-xs uppercase tracking-wider text-cyan-300 font-bold">
-                OpenAI GPT-4o &amp; Codex
-              </span>
-              <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_12px_#06B6D4]"></span>
-            </div>
-            <h2 className="text-xl md:text-2xl font-black text-cyan-100 tracking-tight">
-              Engenharia Lógica &amp; Computação Algorítmica
-            </h2>
-            <p className="text-xs text-cyan-200/70 font-sans leading-relaxed">
-              Arquitetura de código, modelagem matemática e execução técnica de ponta.
-            </p>
-          </div>
-        )}
+                  {/* Orbe Estelar Claude */}
+                  <div className="relative w-20 h-20 md:w-24 md:h-24 rounded-3xl p-0.5 bg-gradient-to-tr from-amber-500 via-orange-400 to-amber-200 shadow-[0_0_35px_rgba(245,158,11,0.5)] flex items-center justify-center">
+                    <div className="w-full h-full rounded-[22px] bg-[#0E0B07]/90 backdrop-blur-xl border border-amber-400/40 flex items-center justify-center relative overflow-hidden">
+                      <div className="absolute inset-1 rounded-2xl border border-amber-400/20 border-dashed animate-spin [animation-duration:12s]" />
+                      <ClaudeIcon className="w-10 h-10 md:w-12 md:h-12 text-amber-400" glow />
+                    </div>
+                  </div>
 
-        {/* CENA 4: FUSÃO CENTRAL */}
-        {scene === 4 && (
-          <div className="space-y-4 animate-in zoom-in-75 duration-700">
-            <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
-              {/* Anel de Plasma */}
-              <div className="absolute inset-0 rounded-full border-2 border-dashed border-cyan-400 animate-spin duration-1000"></div>
-              <div className="absolute inset-2 rounded-full border-2 border-amber-400 animate-spin duration-700 [animation-direction:reverse]"></div>
-              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-amber-500/40 via-cyan-400/40 to-white/60 blur-md animate-pulse"></div>
-              <Sparkles className="w-8 h-8 text-white relative z-10 animate-bounce" />
+                  {/* Identificação Tipográfica */}
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-amber-950/60 border border-amber-500/40 text-amber-300 font-mono text-[10px] tracking-wider uppercase">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                      Anthropic
+                    </div>
+                    <h3 className="text-lg md:text-xl font-black text-amber-100 tracking-tight">
+                      Claude 3.5 Sonnet
+                    </h3>
+                    <p className="text-[11px] text-amber-200/70 font-sans max-w-[180px]">
+                      Inteligência &amp; Síntese Profunda
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* OPÇÃO A: Símbolo menor e discreto */
+                <div className="flex flex-col items-center space-y-2 p-3 rounded-2xl bg-slate-900/80 border border-amber-500/30 shadow-lg backdrop-blur-md">
+                  <div className="w-12 h-12 rounded-xl bg-amber-950/60 border border-amber-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.3)]">
+                    <ClaudeIcon className="w-6 h-6 text-amber-400" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-amber-300 font-mono">Claude 3.5</div>
+                    <div className="text-[10px] text-slate-400">Anthropic</div>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="font-mono text-xs font-bold uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-cyan-300">
-              Convergência das Maiores Inteligências em Andamento...
+
+            {/* CENTRO: Conector de Convergência & Anel de Plasma */}
+            {scene === 4 ? (
+              <div className="relative z-30 flex flex-col items-center space-y-3 animate-in zoom-in-50 duration-700">
+                <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full border-2 border-dashed border-cyan-400 animate-spin [animation-duration:3s]" />
+                  <div className="absolute inset-1 rounded-full border-2 border-amber-400 animate-spin [animation-duration:2s] [animation-direction:reverse]" />
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-amber-500/50 via-white/70 to-cyan-400/50 blur-lg animate-pulse" />
+                  <Sparkles className="w-10 h-10 text-white relative z-10 animate-bounce" />
+                </div>
+                <div className="font-mono text-xs font-black uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-cyan-300 drop-shadow">
+                  Fusão Central: Claude + GPT Convergindo...
+                </div>
+              </div>
+            ) : scene === 3 ? (
+              /* Indicador de Tensão Central durante a Cena 3 */
+              <div className="hidden sm:flex flex-col items-center space-y-2 animate-in fade-in duration-700 z-10">
+                <div className="flex items-center gap-3 text-slate-500 text-xs font-mono">
+                  <span className="w-12 h-px bg-gradient-to-r from-amber-500/60 to-transparent" />
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-900/80 border border-slate-700/60 text-slate-300 text-[10px] uppercase tracking-widest">
+                    Convergência em Andamento
+                  </span>
+                  <span className="w-12 h-px bg-gradient-to-l from-cyan-500/60 to-transparent" />
+                </div>
+              </div>
+            ) : null}
+
+            {/* GPT (OpenAI) - Verde/Turquesa */}
+            <div
+              className={`absolute transition-all duration-1000 ease-in-out flex flex-col items-center text-center z-20 ${
+                scene === 2
+                  ? "translate-x-32 opacity-0 pointer-events-none" // Na cena 2 ainda não entrou
+                  : scene === 3
+                  ? "translate-x-24 sm:translate-x-44 md:translate-x-64 opacity-100 scale-100 animate-in slide-in-from-right duration-700"
+                  : "translate-x-0 opacity-70 scale-90" // Cena 4: converge para o centro
+              }`}
+            >
+              {visualMode === "cinematic" ? (
+                /* OPÇÃO B: Cinematográfica, volumétrica e impactante */
+                <div className="relative flex flex-col items-center space-y-3">
+                  {/* Auréola & Plasma Turquesa */}
+                  <div className="absolute -inset-4 bg-gradient-to-r from-cyan-500/30 via-emerald-500/20 to-teal-600/30 rounded-full blur-xl animate-pulse pointer-events-none" />
+
+                  {/* Orbe Estelar GPT */}
+                  <div className="relative w-20 h-20 md:w-24 md:h-24 rounded-3xl p-0.5 bg-gradient-to-tr from-emerald-400 via-cyan-400 to-teal-200 shadow-[0_0_35px_rgba(6,182,212,0.5)] flex items-center justify-center">
+                    <div className="w-full h-full rounded-[22px] bg-[#051114]/90 backdrop-blur-xl border border-cyan-400/40 flex items-center justify-center relative overflow-hidden">
+                      <div className="absolute inset-1 rounded-2xl border border-cyan-400/20 border-dashed animate-spin [animation-duration:12s]" />
+                      <OpenAIIcon className="w-10 h-10 md:w-12 md:h-12 text-cyan-400" glow />
+                    </div>
+                  </div>
+
+                  {/* Identificação Tipográfica */}
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 font-mono text-[10px] tracking-wider uppercase">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                      OpenAI
+                    </div>
+                    <h3 className="text-lg md:text-xl font-black text-cyan-100 tracking-tight">
+                      GPT-4o &amp; Codex
+                    </h3>
+                    <p className="text-[11px] text-cyan-200/70 font-sans max-w-[180px]">
+                      Engenharia Lógica &amp; Algoritmos
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* OPÇÃO A: Símbolo menor e discreto */
+                <div className="flex flex-col items-center space-y-2 p-3 rounded-2xl bg-slate-900/80 border border-cyan-500/30 shadow-lg backdrop-blur-md">
+                  <div className="w-12 h-12 rounded-xl bg-cyan-950/60 border border-cyan-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.3)]">
+                    <OpenAIIcon className="w-6 h-6 text-cyan-400" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-cyan-300 font-mono">GPT-4o</div>
+                    <div className="text-[10px] text-slate-400">OpenAI</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -484,20 +646,34 @@ export function CinematicLoading({
         {/* CENA 5 & 6: REVELAÇÃO DA LOGO E MANIFESTO */}
         {scene >= 5 && (
           <div className="space-y-6 max-w-2xl mx-auto animate-in zoom-in-95 duration-1000">
-            {/* Logo Materializada com Auréola Holográfica */}
-            <div className="relative w-24 h-24 md:w-32 md:h-32 mx-auto rounded-full p-1 bg-gradient-to-tr from-amber-500 via-cyan-400 to-emerald-400 shadow-[0_0_50px_rgba(0,210,255,0.4)]">
+            {/* Logo Materializada com Auréola Holográfica Dourada + Turquesa */}
+            <div className="relative w-24 h-24 md:w-32 md:h-32 mx-auto rounded-full p-1 bg-gradient-to-tr from-amber-500 via-cyan-400 to-emerald-400 shadow-[0_0_60px_rgba(6,182,212,0.5)]">
               <div className="w-full h-full rounded-full overflow-hidden relative bg-[#070B14]">
                 <Image src="/logo.jpg" alt="ORVEXA Prime Logo" fill className="object-cover" priority />
               </div>
             </div>
 
-            {/* Nome da Marca */}
-            <div className="space-y-2">
+            {/* Nome da Marca e Fórmula de Unificação */}
+            <div className="space-y-3">
               <h1 className="text-3xl md:text-5xl font-black tracking-tight text-white flex items-center justify-center gap-3">
-                ORVEXA <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400">PRIME</span>
+                ORVEXA <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-cyan-300 to-emerald-400">PRIME</span>
               </h1>
-              <div className="inline-block px-3 py-1 rounded-full bg-slate-900/80 border border-cyan-500/30 text-cyan-300 font-mono text-[11px] uppercase tracking-widest">
-                AI Orchestration Architecture
+
+              {/* FÓRMULA DE UNIFICAÇÃO: CLAUDE + GPT = ORVEXA */}
+              <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-slate-900/90 border border-slate-700/80 shadow-inner text-xs font-mono">
+                <span className="flex items-center gap-1.5 text-amber-300 font-semibold">
+                  <ClaudeIcon className="w-3.5 h-3.5" />
+                  Claude 3.5
+                </span>
+                <span className="text-slate-500 font-bold">+</span>
+                <span className="flex items-center gap-1.5 text-cyan-300 font-semibold">
+                  <OpenAIIcon className="w-3.5 h-3.5" />
+                  GPT-4o
+                </span>
+                <span className="text-slate-500 font-bold">➔</span>
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-cyan-300 font-bold">
+                  ORVEXA PRIME
+                </span>
               </div>
             </div>
 
