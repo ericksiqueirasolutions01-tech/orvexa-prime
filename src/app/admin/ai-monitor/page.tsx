@@ -882,7 +882,7 @@ export default function AiMonitorPage() {
                   </label>
                   <input
                     type="url"
-                    placeholder="https://api.mirai.orvexa.digital/v1"
+                    placeholder="https://api.miraiapi.com/v1"
                     value={keyInputBaseUrl}
                     onChange={(e) => setKeyInputBaseUrl(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 focus:border-cyan-500 text-xs font-mono text-white placeholder-slate-400 focus:outline-none"

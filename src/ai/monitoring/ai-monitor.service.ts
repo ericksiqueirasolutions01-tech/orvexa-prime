@@ -46,7 +46,7 @@ export const MONITORED_PROVIDERS: ProviderDefinition[] = [
     categoryLabel: "OpenAI Compatível",
     description: "Gateway proxy Mirai API de alto desempenho e latência ultrabaixa.",
     avatar: "⚡",
-    defaultBaseUrl: "https://api.mirai.orvexa.digital/v1",
+    defaultBaseUrl: "https://api.miraiapi.com/v1",
     primaryModel: "gpt-5.6-sol",
   },
   {

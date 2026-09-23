@@ -31,7 +31,7 @@ async function main() {
     console.log("--- TESTE 1: Cadastro de Conta Mirai API com Quotas e Criptografia ---");
     const accountName = `Mirai Enterprise High-Speed ${Date.now()}`;
     const rawApiKey = "sk-mirai-super-secret-key-orvexa-2026";
-    const customBaseUrl = "https://api.mirai.io/v1";
+    const customBaseUrl = "https://api.miraiapi.com/v1";
     const expirationDate = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(); // 60 dias
     const renewalDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 dias
     const totalQuota = 10_000_000; // 10M tokens

@@ -77,17 +77,41 @@ export class AIProviderService {
 
   /**
    * REGRA 1 & 2: Resolução determinística da Base URL para gateways OpenAI
-   * 1. Se existir OPENAI_BASE_URL configurada (customBaseUrl da chave, SystemSetting, AiProvider ou .env), usar ela.
-   * 2. Se estiver vazia: usar API oficial OpenAI (https://api.openai.com/v1).
+   * 1. Se existir OPENAI_BASE_URL ou MIRAI_BASE_URL configurada (customBaseUrl da chave, SystemSetting, AiProvider ou .env), usar ela.
+   * 2. Se for Mirai: usar https://api.miraiapi.com/v1.
+   * 3. Se for OpenAI padrão e vazia: usar API oficial OpenAI (https://api.openai.com/v1).
    */
-  public static async resolveOpenAiBaseUrl(customBaseUrl?: string | null): Promise<string> {
+  public static async resolveOpenAiBaseUrl(customBaseUrl?: string | null, providerSlug?: string): Promise<string> {
     // 1. URL explícita informada para a chave específica
     if (customBaseUrl && customBaseUrl.trim()) {
       return customBaseUrl.trim().replace(/\/+$/, "");
     }
 
     try {
-      // 2. Configuração global salva na tabela SystemSetting ("openai_base_url")
+      // 2. Se for provedor Mirai explícito
+      if (providerSlug === "mirai") {
+        const miraiSetting = await prisma.systemSetting.findUnique({
+          where: { key: "mirai_base_url" },
+        });
+        if (miraiSetting?.value && miraiSetting.value.trim()) {
+          return miraiSetting.value.trim().replace(/\/+$/, "");
+        }
+
+        const miraiProvider = await prisma.aiProvider.findUnique({
+          where: { slug: "mirai" },
+        });
+        if (miraiProvider?.baseUrl && miraiProvider.baseUrl.trim()) {
+          return miraiProvider.baseUrl.trim().replace(/\/+$/, "");
+        }
+
+        if (process.env.MIRAI_BASE_URL && process.env.MIRAI_BASE_URL.trim()) {
+          return process.env.MIRAI_BASE_URL.trim().replace(/\/+$/, "");
+        }
+
+        return "https://api.miraiapi.com/v1";
+      }
+
+      // 3. Configuração global salva na tabela SystemSetting ("openai_base_url")
       const setting = await prisma.systemSetting.findUnique({
         where: { key: "openai_base_url" },
       });
@@ -95,7 +119,7 @@ export class AIProviderService {
         return setting.value.trim().replace(/\/+$/, "");
       }
 
-      // 3. Configuração do registro do provedor "openai" na tabela AiProvider
+      // 4. Configuração do registro do provedor "openai" na tabela AiProvider
       const provider = await prisma.aiProvider.findUnique({
         where: { slug: "openai" },
       });
@@ -106,12 +130,12 @@ export class AIProviderService {
       // Falha graciosa caso o banco esteja inacessível em ambiente de teste
     }
 
-    // 4. Variável de ambiente do sistema (.env)
+    // 5. Variável de ambiente do sistema (.env)
     if (process.env.OPENAI_BASE_URL && process.env.OPENAI_BASE_URL.trim()) {
       return process.env.OPENAI_BASE_URL.trim().replace(/\/+$/, "");
     }
 
-    // 5. Default oficial OpenAI
+    // 6. Default oficial OpenAI
     return this.OFFICIAL_OPENAI_URL;
   }
 
@@ -187,7 +211,7 @@ export class AIProviderService {
       }
 
       // 3. Provedores Padrão OpenAI (OpenAI Oficial, Mirai API, OpenRouter, Azure, LocalAI, Mistral, DeepSeek, Llama)
-      const openAiBaseUrl = await this.resolveOpenAiBaseUrl(customUrl);
+      const openAiBaseUrl = await this.resolveOpenAiBaseUrl(customUrl, provider);
       return await this.testOpenAiCompatibleConnection(rawKey, openAiBaseUrl, provider, startTime);
     } catch (err: any) {
       const latencyMs = Date.now() - startTime;
@@ -461,7 +485,7 @@ export class AIProviderService {
 
     // 3. Provedores OpenAI Compatíveis:
     // OpenAI Oficial, Mirai API, OpenRouter, Azure OpenAI, LocalAI, Mistral, DeepSeek, Llama
-    const openAiBaseUrl = await this.resolveOpenAiBaseUrl(customBaseUrl);
+    const openAiBaseUrl = await this.resolveOpenAiBaseUrl(customBaseUrl, providerSlug);
     return this.callOpenAiCompatibleStream({
       apiKey,
       modelIdentifier: normalizedModel,
@@ -553,7 +577,7 @@ export class AIProviderService {
     const defaultFallbackModels: Record<string, string> = {
       openai: "gpt-5.6-sol",
       anthropic: "claude-sonnet-5",
-      google: "gemini-3-flash-preview",
+      google: "gemini-3.6-flash",
     };
 
     for (const altSlug of fallbackCandidates) {
@@ -747,10 +771,10 @@ export class AIProviderService {
 
     const candidateModels = [
       modelIdentifier,
-      "gemini-3-flash-preview",
-      "gemini-3.1-flash-lite-preview",
       "gemini-3.6-flash",
-      "gemini-1.5-pro",
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest",
+      "gemini-3.1-flash-lite-preview",
     ].filter((v, i, a) => a.indexOf(v) === i);
 
     let lastError: any = null;
@@ -780,8 +804,8 @@ export class AIProviderService {
           error.status = response.status;
           lastError = error;
 
-          if (response.status === 503 || response.status === 404) {
-            console.warn(`[AIProviderService] Modelo Gemini ${testModel} indisponível (${response.status}), tentando alternativo...`);
+          if (response.status === 503 || response.status === 404 || response.status === 429) {
+            console.warn(`[AIProviderService] Modelo Gemini ${testModel} indisponível ou rate limited (${response.status}), tentando alternativo...`);
             continue;
           }
           throw error;
@@ -791,7 +815,7 @@ export class AIProviderService {
       } catch (err: any) {
         clearTimeout(timeout);
         lastError = err;
-        if (err.status === 503 || err.status === 404) {
+        if (err.status === 503 || err.status === 404 || err.status === 429) {
           continue;
         }
         throw err;

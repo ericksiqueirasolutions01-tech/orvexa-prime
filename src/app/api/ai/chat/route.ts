@@ -35,6 +35,7 @@ export async function POST(req: Request) {
       fileCategory,
       fileSizeBytes,
       intent,
+      fileIds,
     } = await req.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -238,6 +239,49 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
           },
         }).catch(() => {});
       }
+    }
+
+    // 3.0 Vinculação e Injeção de Contexto de Arquivos Anexados nesta Conversa
+    const attachedFileIds: string[] = Array.isArray(fileIds) ? fileIds.filter(Boolean) : [];
+
+    // Se temos arquivos enviados nesta interação, vincula à conversa ativa
+    if (attachedFileIds.length > 0 && activeConvId) {
+      await prisma.file.updateMany({
+        where: { id: { in: attachedFileIds }, userId: session.id },
+        data: { conversationId: activeConvId },
+      }).catch(() => {});
+    }
+
+    // Busca arquivos relevantes desta conversa ou passados explicitamente
+    let relevantFiles: any[] = [];
+    if (attachedFileIds.length > 0) {
+      relevantFiles = await prisma.file.findMany({
+        where: { id: { in: attachedFileIds }, userId: session.id },
+      });
+    } else if (hasFiles && activeConvId) {
+      relevantFiles = await prisma.file.findMany({
+        where: { conversationId: activeConvId, userId: session.id },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      });
+    }
+
+    if (relevantFiles.length > 0) {
+      const filesContextBlock = relevantFiles
+        .map((f) => {
+          const content =
+            f.extractedText && f.extractedText.trim().length > 0
+              ? f.extractedText.trim()
+              : `[Arquivo anexado: "${f.originalName}" (${f.mimeType || f.category}) - ${((f.fileSizeBytes || 0) / 1024).toFixed(1)} KB - processamento estruturado concluído]`;
+          return `--- [ARQUIVO ANEXADO À CONVERSA: "${f.originalName}"] ---\nTipo/Formato: ${f.category || f.mimeType}\nTamanho: ${((f.fileSizeBytes || 0) / 1024).toFixed(1)} KB\n\nCONTEÚDO DO ARQUIVO:\n${content.slice(0, 35000)}\n--- [FIM DO ARQUIVO: "${f.originalName}"] ---`;
+        })
+        .join("\n\n");
+
+      const fileDirective = `[DOCUMENTOS & ARQUIVOS ANEXADOS PELO USUÁRIO NESTA CONVERSA]:
+O usuário anexou ${relevantFiles.length} arquivo(s) a esta conversa. O conteúdo textual extraído de cada um está fornecido abaixo com fidelidade total.
+Utilize as informações destes documentos para responder com precisão técnica e detalhada a todas as solicitações, análises, resumos ou dúvidas do usuário sobre eles. NUNCA diga que o arquivo não consta ou que não foi recebido, pois os dados estão disponíveis acima.\n\n${filesContextBlock}`;
+
+      systemPrompt = [fileDirective, systemPrompt].filter(Boolean).join("\n\n");
     }
 
     // 3.1 Injeção de Contexto do Projeto e Memória Contextual

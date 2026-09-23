@@ -23,7 +23,7 @@ export const QUOTA_SUPPORTED_PROVIDERS: Record<string, QuotaProviderConfig> = {
     slug: "mirai",
     name: "Mirai API",
     category: "MIRAI",
-    defaultBaseUrl: "https://api.mirai.io/v1",
+    defaultBaseUrl: "https://api.miraiapi.com/v1",
     avatar: "🔮",
     color: "from-purple-500/20 to-indigo-600/20 border-purple-500/30 text-purple-300",
     accentHex: "#A855F7",

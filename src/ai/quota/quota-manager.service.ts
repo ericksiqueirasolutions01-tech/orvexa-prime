@@ -80,7 +80,7 @@ export class AiQuotaManagerService {
         expirationDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 dias
         renewalDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
         status: "CONNECTED",
-        customBaseUrl: "https://api.mirai.io/v1",
+        customBaseUrl: "https://api.miraiapi.com/v1",
         detectedModels: JSON.stringify(["mirai-gpt-4o", "mirai-claude-3.5", "mirai-deepseek-v3"]),
       },
       {

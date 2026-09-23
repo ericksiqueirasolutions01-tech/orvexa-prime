@@ -23,7 +23,7 @@ export const SUPPORTED_KEY_PROVIDERS: KeyProviderConfig[] = [
     name: "Mirai API",
     avatar: "⚡",
     category: "GATEWAY",
-    defaultBaseUrl: "https://api.mirai.orvexa.digital/v1",
+    defaultBaseUrl: "https://api.miraiapi.com/v1",
     primaryModel: "gpt-5.6-sol",
   },
   {

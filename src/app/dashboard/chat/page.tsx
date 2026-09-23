@@ -779,6 +779,7 @@ export default function ChatModernPage() {
 
     // Upload de arquivos associados se houver
     let fileUploadedOk = false;
+    const uploadedFileIds: string[] = [];
     if (attachedFiles.length > 0) {
       setUploadingFiles(true);
       try {
@@ -789,11 +790,19 @@ export default function ChatModernPage() {
             if (activeConversationId) {
               formData.append("conversationId", activeConversationId);
             }
-            await fetch("/api/workspace/upload", {
+            const uploadRes = await fetch("/api/workspace/upload", {
               method: "POST",
               body: formData,
             });
-            fileUploadedOk = true;
+            if (uploadRes.ok) {
+              const uploadData = await uploadRes.json();
+              if (uploadData.uploaded && Array.isArray(uploadData.uploaded)) {
+                for (const u of uploadData.uploaded) {
+                  if (u.id) uploadedFileIds.push(u.id);
+                }
+              }
+              fileUploadedOk = true;
+            }
           }
         }
       } catch (err) {
@@ -834,6 +843,7 @@ export default function ChatModernPage() {
           projectId: activeProjectId || undefined,
           agentId: activeAgentId || undefined,
           hasFiles: fileUploadedOk || (userMessage.attachedFileNames && userMessage.attachedFileNames.length > 0),
+          fileIds: uploadedFileIds.length > 0 ? uploadedFileIds : undefined,
         }),
       });
 

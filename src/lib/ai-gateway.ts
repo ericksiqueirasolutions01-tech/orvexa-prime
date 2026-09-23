@@ -227,13 +227,13 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
  * Registra falha de chave e coloca em quarentena se necessário.
  */
 export async function markKeyError(apiKeyId: string, isRateLimit: boolean) {
-  const quarantineMinutes = isRateLimit ? 2 : 5;
-  const quarantinedUntil = new Date(Date.now() + quarantineMinutes * 60 * 1000);
-
   const key = await prisma.apiKey.findUnique({ where: { id: apiKeyId } });
   const currentErrors = (key?.errorCount || 0) + 1;
   const shouldSetError = currentErrors >= 3;
-  const statusToSet = isRateLimit ? "RATE_LIMITED" : (shouldSetError ? "ERROR" : (key?.status || "ACTIVE"));
+  // Rate limit transitório: quarentena curta de 3 a 10 segundos
+  const quarantineSeconds = isRateLimit ? 5 : 300;
+  const quarantinedUntil = new Date(Date.now() + quarantineSeconds * 1000);
+  const statusToSet = shouldSetError ? (isRateLimit ? "RATE_LIMITED" : "ERROR") : (key?.status || "ACTIVE");
 
   await prisma.apiKey.update({
     where: { id: apiKeyId },
@@ -564,7 +564,12 @@ DIRETRIZES FUNDAMENTAIS:
     for (const altKey of altKeys) {
       try {
         const decryptedKey = decryptApiKey(altKey.encryptedKey, altKey.iv, altKey.authTag);
-        const altModelIdentifier = altSlug === "openai" ? "gpt-6-astra" : "claude-fable-5.1";
+        const altModelIdentifier =
+          altSlug === "openai"
+            ? "gpt-4o"
+            : altSlug === "anthropic"
+            ? "claude-sonnet-5"
+            : "gemini-3.6-flash";
         const stream = await callExternalProviderStream({
           providerSlug: altSlug,
           modelIdentifier: altModelIdentifier,

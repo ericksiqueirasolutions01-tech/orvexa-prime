@@ -887,7 +887,7 @@ export default function AiQuotaManagerPage() {
                   type="text"
                   value={formData.customBaseUrl}
                   onChange={(e) => setFormData({ ...formData, customBaseUrl: e.target.value })}
-                  placeholder="https://api.mirai.io/v1 ou endpoint Azure"
+                  placeholder="https://api.miraiapi.com/v1 ou endpoint Azure"
                   className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:border-cyan-500 focus:outline-none font-mono text-xs"
                 />
               </div>
