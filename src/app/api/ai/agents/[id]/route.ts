@@ -1,11 +1,10 @@
 // src/app/api/ai/agents/[id]/route.ts
-// DETALHES, ATUALIZAÇÃO E EXCLUSÃO DE AGENTE — ORVEXA PRIME
+// DETALHES, EDIÇÃO E EXCLUSÃO DE AGENTE — ORVEXA AGENTS
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
@@ -19,12 +18,16 @@ export async function GET(
     }
 
     const { id } = params;
+
     const agent = await prisma.agent.findFirst({
       where: {
         OR: [{ id }, { slug: id }],
       },
       include: {
         preferredModel: true,
+        project: {
+          select: { id: true, name: true, customInstructions: true },
+        },
         _count: {
           select: {
             conversations: { where: { userId: user.id } },
@@ -38,17 +41,34 @@ export async function GET(
       return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
     }
 
+    let tools: any[] = [];
+    try {
+      tools = JSON.parse(agent.tools || "[]");
+    } catch {}
+
+    const preferredModel =
+      agent.modelPreference ||
+      agent.preferredModel?.modelIdentifier ||
+      agent.preferredModelId ||
+      "orvexa-prime";
+
     return NextResponse.json({
       success: true,
       agent: {
         ...agent,
-        tools: JSON.parse(agent.tools || "[]"),
-        allowedRoles: JSON.parse(agent.allowedRoles || "[\"USER\",\"ADMIN\"]"),
-        allowedPlans: JSON.parse(agent.allowedPlans || "[\"ALL\"]"),
+        avatar: agent.avatar || "🤖",
+        instructions: agent.instructions || agent.systemPrompt,
+        preferredModel,
+        tools,
+        isOwner: agent.userId === user.id || user.role === "ADMIN",
+        stats: {
+          conversationsCount: agent._count.conversations,
+          memoriesCount: agent._count.agentMemories,
+        },
       },
     });
   } catch (error: any) {
-    console.error("[Agent GET Error]:", error);
+    console.error("[Agent GET [id] Error]:", error);
     return NextResponse.json(
       { error: "Erro ao buscar agente: " + error.message },
       { status: 500 }
@@ -56,75 +76,103 @@ export async function GET(
   }
 }
 
-export async function PUT(
+export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== "ADMIN") {
+    if (!user) {
+      return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
+    }
+
+    const { id } = params;
+
+    const agent = await prisma.agent.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+    });
+
+    if (!agent) {
+      return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
+    }
+
+    // Permissão: dono ou ADMIN
+    if (agent.userId !== user.id && user.role !== "ADMIN") {
       return NextResponse.json(
-        { error: "Apenas administradores podem alterar configurações de agentes." },
+        { error: "Você não tem permissão para editar este agente." },
         { status: 403 }
       );
     }
 
-    const { id } = params;
     const body = await req.json();
+    const {
+      name,
+      role,
+      description,
+      avatar,
+      instructions,
+      systemPrompt,
+      preferredModel,
+      projectId,
+      tools,
+      color,
+      isActive,
+    } = body;
 
-    const existing = await prisma.agent.findFirst({
-      where: {
-        OR: [{ id }, { slug: id }],
-      },
-    });
-
-    if (!existing) {
-      return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
-    }
-
-    // Processa atualização de campos
     const updateData: any = {};
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.role !== undefined) updateData.role = body.role;
-    if (body.badge !== undefined) updateData.badge = body.badge;
-    if (body.color !== undefined) updateData.color = body.color;
-    if (body.description !== undefined) updateData.description = body.description;
-    if (body.systemPrompt !== undefined) updateData.systemPrompt = body.systemPrompt;
-    if (body.iconName !== undefined) updateData.iconName = body.iconName;
-    if (body.category !== undefined) updateData.category = body.category;
-    if (body.isActive !== undefined) updateData.isActive = Boolean(body.isActive);
 
-    if (body.tools !== undefined) {
-      updateData.tools = typeof body.tools === "string" ? body.tools : JSON.stringify(body.tools);
-    }
-    if (body.allowedRoles !== undefined) {
-      updateData.allowedRoles = typeof body.allowedRoles === "string" ? body.allowedRoles : JSON.stringify(body.allowedRoles);
-    }
-    if (body.allowedPlans !== undefined) {
-      updateData.allowedPlans = typeof body.allowedPlans === "string" ? body.allowedPlans : JSON.stringify(body.allowedPlans);
+    if (name !== undefined) updateData.name = name.trim();
+    if (role !== undefined) updateData.role = role.trim();
+    if (description !== undefined) updateData.description = description.trim();
+    if (avatar !== undefined) updateData.avatar = avatar;
+    if (color !== undefined) updateData.color = color;
+    if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+
+    if (instructions !== undefined || systemPrompt !== undefined) {
+      const prompt = (instructions || systemPrompt || "").trim();
+      updateData.instructions = prompt;
+      updateData.systemPrompt = prompt;
     }
 
-    if (body.preferredModelId !== undefined) {
-      const modelInDb = await prisma.aiModel.findFirst({
-        where: {
-          OR: [{ id: body.preferredModelId }, { modelIdentifier: body.preferredModelId }],
-        },
-      });
-      updateData.preferredModelId = modelInDb?.id || null;
+    if (preferredModel !== undefined) {
+      updateData.modelPreference = preferredModel || "orvexa-prime";
+    }
+
+    if (projectId !== undefined) {
+      if (projectId) {
+        const proj = await prisma.project.findFirst({
+          where: { id: projectId, userId: user.id },
+        });
+        updateData.projectId = proj ? proj.id : null;
+      } else {
+        updateData.projectId = null;
+      }
+    }
+
+    if (tools !== undefined) {
+      updateData.tools = JSON.stringify(tools || []);
     }
 
     const updated = await prisma.agent.update({
-      where: { id: existing.id },
+      where: { id: agent.id },
       data: updateData,
+      include: {
+        project: { select: { id: true, name: true } },
+      },
     });
 
     return NextResponse.json({
       success: true,
-      agent: updated,
+      agent: {
+        ...updated,
+        tools: typeof updated.tools === "string" ? JSON.parse(updated.tools) : updated.tools,
+        preferredModel: updated.modelPreference,
+        isOwner: true,
+      },
       message: `Agente "${updated.name}" atualizado com sucesso.`,
     });
   } catch (error: any) {
-    console.error("[Agent PUT Error]:", error);
+    console.error("[Agent PATCH [id] Error]:", error);
     return NextResponse.json(
       { error: "Erro ao atualizar agente: " + error.message },
       { status: 500 }
@@ -138,48 +186,55 @@ export async function DELETE(
 ) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== "ADMIN") {
+    if (!user) {
+      return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
+    }
+
+    const { id } = params;
+
+    const agent = await prisma.agent.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+    });
+
+    if (!agent) {
+      return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
+    }
+
+    // Não permite que usuários normais excluam agentes nativos do sistema
+    if (agent.isSystem && user.role !== "ADMIN") {
       return NextResponse.json(
-        { error: "Apenas administradores podem excluir agentes." },
+        { error: "Agentes oficiais do sistema não podem ser excluídos." },
         { status: 403 }
       );
     }
 
-    const { id } = params;
-    const existing = await prisma.agent.findFirst({
-      where: {
-        OR: [{ id }, { slug: id }],
-      },
-    });
-
-    if (!existing) {
-      return NextResponse.json({ error: "Agente não encontrado." }, { status: 404 });
-    }
-
-    // Agentes nativos do sistema não podem ser excluídos, apenas desativados
-    if (existing.isSystem) {
+    // Permissão: dono ou ADMIN
+    if (agent.userId !== user.id && user.role !== "ADMIN") {
       return NextResponse.json(
-        {
-          error: "Agentes nativos da ORVEXA não podem ser excluídos. Você pode desativá-los com o botão de status.",
-        },
-        { status: 400 }
+        { error: "Você não tem permissão para excluir este agente." },
+        { status: 403 }
       );
     }
 
+    // Desvincula conversas associadas antes de deletar
+    await prisma.conversation.updateMany({
+      where: { agentId: agent.id },
+      data: { agentId: null },
+    });
+
     await prisma.agent.delete({
-      where: { id: existing.id },
+      where: { id: agent.id },
     });
 
     return NextResponse.json({
       success: true,
-      message: `Agente "${existing.name}" excluído com sucesso.`,
+      message: `Agente "${agent.name}" excluído com sucesso.`,
     });
   } catch (error: any) {
-    console.error("[Agent DELETE Error]:", error);
+    console.error("[Agent DELETE [id] Error]:", error);
     return NextResponse.json(
       { error: "Erro ao excluir agente: " + error.message },
       { status: 500 }
     );
   }
 }
-

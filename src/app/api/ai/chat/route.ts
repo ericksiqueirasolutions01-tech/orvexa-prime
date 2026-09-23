@@ -89,6 +89,8 @@ export async function POST(req: Request) {
     let systemPrompt: string | undefined;
     let effectiveModelPreference = modelPreference;
     let resolvedAgentId: string | null = null;
+    let resolvedAgent: any = null;
+    let agentLinkedProjectId: string | null = null;
     let autoToolBadge: string | undefined;
 
     if (agentId) {
@@ -101,52 +103,57 @@ export async function POST(req: Request) {
 
       if (agent) {
         // Validação de status ativo
-        if (!agent.isActive && session.role !== "ADMIN") {
+        if (!agent.isActive && session.role !== "ADMIN" && agent.userId !== session.id) {
           return NextResponse.json(
             { error: `O especialista "${agent.name}" está temporariamente desativado.` },
             { status: 403 }
           );
         }
 
-        // Validação de permissões por plano/role reutilizando consumptionSummary pré-carregado
-        let allowedRoles: string[] = ["USER", "ADMIN"];
-        let allowedPlans: string[] = ["ALL"];
-        try {
-          allowedRoles = JSON.parse(agent.allowedRoles || "[\"USER\",\"ADMIN\"]");
-        } catch {}
-        try {
-          allowedPlans = JSON.parse(agent.allowedPlans || "[\"ALL\"]");
-        } catch {}
+        // Usuário dono do agente personalizado sempre tem acesso livre
+        const isOwner = agent.userId === session.id;
 
-        const planSlug = consumptionSummary.plan.slug.toUpperCase();
+        if (!isOwner && agent.isSystem) {
+          let allowedRoles: string[] = ["USER", "ADMIN"];
+          let allowedPlans: string[] = ["ALL"];
+          try {
+            allowedRoles = JSON.parse(agent.allowedRoles || "[\"USER\",\"ADMIN\"]");
+          } catch {}
+          try {
+            allowedPlans = JSON.parse(agent.allowedPlans || "[\"ALL\"]");
+          } catch {}
 
-        const hasAccess =
-          (allowedRoles.includes(session.role) &&
-            (allowedPlans.includes("ALL") || allowedPlans.includes(planSlug))) ||
-          session.role === "ADMIN";
+          const planSlug = consumptionSummary.plan.slug.toUpperCase();
+          const hasAccess =
+            (allowedRoles.includes(session.role) &&
+              (allowedPlans.includes("ALL") || allowedPlans.includes(planSlug))) ||
+            session.role === "ADMIN";
 
-        const agentGuard = await assertCanUseAgent(session.id, agent.slug, consumptionSummary);
-        if (!agentGuard.allowed) {
-          return NextResponse.json(
-            {
-              error: agentGuard.reason,
-              planUpgradeRequired: true,
-            },
-            { status: 403 }
-          );
-        }
+          const agentGuard = await assertCanUseAgent(session.id, agent.slug, consumptionSummary);
+          if (!agentGuard.allowed) {
+            return NextResponse.json(
+              {
+                error: agentGuard.reason,
+                planUpgradeRequired: true,
+              },
+              { status: 403 }
+            );
+          }
 
-        if (!hasAccess) {
-          return NextResponse.json(
-            {
-              error: `O agente ${agent.name} está disponível exclusivamente para os planos: ${allowedPlans.join(", ")}. Faça upgrade da sua conta.`,
-            },
-            { status: 403 }
-          );
+          if (!hasAccess) {
+            return NextResponse.json(
+              {
+                error: `O agente ${agent.name} está disponível exclusivamente para os planos: ${allowedPlans.join(", ")}. Faça upgrade da sua conta.`,
+              },
+              { status: 403 }
+            );
+          }
         }
 
         resolvedAgentId = agent.id;
-        systemPrompt = agent.systemPrompt;
+        resolvedAgent = agent;
+        agentLinkedProjectId = agent.projectId || null;
+        systemPrompt = agent.instructions || agent.systemPrompt;
 
         // Injeta a memória dedicada do agente sobre o usuário
         const agentMemoryContext = await buildAgentMemoryContextPrompt(agent.id, session.id);
@@ -154,8 +161,13 @@ export async function POST(req: Request) {
           systemPrompt += `\n${agentMemoryContext}`;
         }
 
-        if (agent.preferredModel && modelPreference === "orvexa-prime") {
-          effectiveModelPreference = agent.preferredModel.modelIdentifier;
+        // Aplica modelo preferencial do agente se usuário não forçou outro
+        if (modelPreference === "orvexa-prime" || !modelPreference) {
+          if (agent.modelPreference && agent.modelPreference !== "orvexa-prime") {
+            effectiveModelPreference = agent.modelPreference;
+          } else if (agent.preferredModel) {
+            effectiveModelPreference = agent.preferredModel.modelIdentifier;
+          }
         }
 
         // Despacho Autônomo de Ferramentas
@@ -204,7 +216,7 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
       }
     }
 
-    const effectiveProjectId = projectId || existingConvProjectId || null;
+    const effectiveProjectId = projectId || existingConvProjectId || agentLinkedProjectId || null;
 
     if (!activeConvId) {
       const newConv = await prisma.conversation.create({
@@ -362,6 +374,9 @@ Apresente o resultado gerado acima para o usuário de forma profissional, enriqu
         "x-orvexa-failover": gatewayResult.isFailover ? "true" : "false",
         "x-orvexa-key-status": gatewayResult.apiKeyName?.includes("Fallback") ? "fallback" : "live",
         "x-orvexa-auto-tool": autoToolBadge ? encodeURIComponent(autoToolBadge) : "",
+        "x-orvexa-agent-id": resolvedAgentId || "",
+        "x-orvexa-agent-name": resolvedAgent ? encodeURIComponent(resolvedAgent.name) : "",
+        "x-orvexa-agent-avatar": resolvedAgent?.avatar ? encodeURIComponent(resolvedAgent.avatar) : "",
       },
     });
   } catch (error: any) {

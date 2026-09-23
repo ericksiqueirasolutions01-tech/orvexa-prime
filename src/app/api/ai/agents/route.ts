@@ -1,5 +1,5 @@
 // src/app/api/ai/agents/route.ts
-// GERENCIADOR DE AGENTES PROFISSIONAIS — ORVEXA PRIME
+// GERENCIADOR DE AGENTES ESPECIALISTAS (ORVEXA AGENTS)
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
@@ -15,20 +15,60 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
     }
 
-    // Sincroniza agentes nativos com o banco se necessário
-    const agentCount = await prisma.agent.count();
-    if (agentCount === 0) {
+    // Sincroniza agentes oficiais com o banco se ainda não existirem os 5 padrão
+    const standardCount = await prisma.agent.count({
+      where: {
+        slug: {
+          in: ["analista-financeiro", "especialista-marketing", "programador", "assistente-juridico", "professor"],
+        },
+      },
+    });
+
+    if (standardCount < 5) {
       await syncOfficialAgentsToDatabase();
     }
 
     const { searchParams } = new URL(req.url);
+    const search = searchParams.get("search") || searchParams.get("q") || "";
+    const projectId = searchParams.get("projectId");
     const includeInactive = searchParams.get("includeInactive") === "true" && user.role === "ADMIN";
 
-    // Busca agentes do banco
+    const whereConditions: any[] = [];
+
+    if (!includeInactive) {
+      whereConditions.push({ isActive: true });
+    }
+
+    // Agentes visíveis: oficiais do sistema OU criados por este usuário (ou todos se for ADMIN)
+    if (user.role !== "ADMIN") {
+      whereConditions.push({
+        OR: [{ isSystem: true }, { userId: user.id }],
+      });
+    }
+
+    if (projectId) {
+      whereConditions.push({
+        OR: [{ projectId }, { projectId: null }],
+      });
+    }
+
+    if (search.trim()) {
+      whereConditions.push({
+        OR: [
+          { name: { contains: search } },
+          { description: { contains: search } },
+          { role: { contains: search } },
+        ],
+      });
+    }
+
     const dbAgents = await prisma.agent.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      where: whereConditions.length > 0 ? { AND: whereConditions } : {},
       include: {
         preferredModel: true,
+        project: {
+          select: { id: true, name: true },
+        },
         _count: {
           select: {
             conversations: { where: { userId: user.id } },
@@ -36,67 +76,59 @@ export async function GET(req: NextRequest) {
           },
         },
       },
-      orderBy: [{ isSystem: "desc" }, { createdAt: "asc" }],
+      orderBy: [{ isSystem: "desc" }, { createdAt: "desc" }],
     });
-
-    // Obtém o plano do usuário para conferência de permissões
-    const userPlan = await prisma.user.findUnique({
-      where: { id: user.id },
-      include: { plan: true },
-    });
-    const planSlug = userPlan?.plan?.slug?.toUpperCase() || "FREE";
 
     const formattedAgents = dbAgents.map((ag) => {
       let tools: any[] = [];
-      let allowedRoles: string[] = ["USER", "ADMIN"];
-      let allowedPlans: string[] = ["ALL"];
-
       try {
         tools = JSON.parse(ag.tools || "[]");
       } catch {}
-      try {
-        allowedRoles = JSON.parse(ag.allowedRoles || "[\"USER\",\"ADMIN\"]");
-      } catch {}
-      try {
-        allowedPlans = JSON.parse(ag.allowedPlans || "[\"ALL\"]");
-      } catch {}
 
-      // Verificação de permissão por usuário e plano
-      const isRoleAllowed = allowedRoles.includes(user.role) || user.role === "ADMIN";
-      const isPlanAllowed =
-        allowedPlans.includes("ALL") ||
-        allowedPlans.includes(planSlug) ||
-        user.role === "ADMIN";
+      // Mapeamento de avatar inteligente
+      let avatar = ag.avatar;
+      if (!avatar) {
+        if (ag.slug === "analista-financeiro" || ag.iconName === "TrendingUp") avatar = "💰";
+        else if (ag.slug === "especialista-marketing" || ag.iconName === "Megaphone") avatar = "🚀";
+        else if (ag.slug === "programador" || ag.iconName === "Code2") avatar = "💻";
+        else if (ag.slug === "assistente-juridico" || ag.iconName === "Scale") avatar = "⚖️";
+        else if (ag.slug === "professor" || ag.iconName === "GraduationCap") avatar = "🎓";
+        else avatar = "🤖";
+      }
 
-      const hasPermission = isRoleAllowed && isPlanAllowed;
+      const preferredModel =
+        ag.modelPreference ||
+        ag.preferredModel?.modelIdentifier ||
+        ag.preferredModelId ||
+        "orvexa-prime";
 
       return {
         id: ag.id,
         slug: ag.slug,
         name: ag.name,
         role: ag.role,
-        badge: ag.badge,
+        badge: ag.badge || (ag.isSystem ? "OFICIAL" : "PERSONALIZADO"),
         color: ag.color,
+        avatar,
         description: ag.description,
+        instructions: ag.instructions || ag.systemPrompt,
         systemPrompt: ag.systemPrompt,
-        preferredModelId: ag.preferredModel?.modelIdentifier || ag.preferredModelId || "orvexa-prime",
-        preferredModelName: ag.preferredModel?.name || "ORVEXA Prime Router",
+        preferredModel,
+        preferredModelId: preferredModel,
+        preferredModelName: ag.preferredModel?.name || (preferredModel === "orvexa-prime" ? "ORVEXA AUTO" : preferredModel),
         iconName: ag.iconName,
         category: ag.category,
+        projectId: ag.projectId,
+        project: ag.project,
         tools,
-        allowedRoles,
-        allowedPlans,
         isSystem: ag.isSystem,
         isActive: ag.isActive,
+        isOwner: ag.userId === user.id || user.role === "ADMIN",
         createdAt: ag.createdAt,
         stats: {
           userConversationsCount: ag._count.conversations,
           userMemoriesCount: ag._count.agentMemories,
         },
-        hasPermission,
-        lockedReason: !hasPermission
-          ? `Disponível nos planos: ${allowedPlans.join(", ")}`
-          : undefined,
       };
     });
 
@@ -117,11 +149,8 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== "ADMIN") {
-      return NextResponse.json(
-        { error: "Apenas administradores podem criar novos agentes." },
-        { status: 403 }
-      );
+    if (!user) {
+      return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
     }
 
     const body = await req.json();
@@ -129,76 +158,85 @@ export async function POST(req: NextRequest) {
       name,
       slug: rawSlug,
       role = "Especialista",
-      badge = "CUSTOM AGENT",
+      badge,
       color = "cyan",
+      avatar = "🤖",
       description,
+      instructions,
       systemPrompt,
-      preferredModelId,
+      preferredModel = "orvexa-prime",
+      projectId = null,
       iconName = "Bot",
-      category = "GERAL",
+      category = "PERSONALIZADO",
       tools = [],
-      allowedRoles = ["USER", "ADMIN"],
-      allowedPlans = ["ALL"],
     } = body;
 
-    if (!name || !description || !systemPrompt) {
+    if (!name || !description) {
       return NextResponse.json(
-        { error: "Nome, descrição e instruções (systemPrompt) são obrigatórios." },
+        { error: "Nome e descrição do agente são obrigatórios." },
         { status: 400 }
       );
     }
 
-    const slug = (
-      rawSlug || name.toLowerCase().replace(/[^a-z0-9]/g, "-")
-    )
-      .replace(/-+/g, "-")
-      .trim();
+    const effectiveInstructions = (instructions || systemPrompt || description).trim();
 
-    // Verifica unicidade do slug
-    const existing = await prisma.agent.findUnique({ where: { slug } });
-    if (existing) {
-      return NextResponse.json(
-        { error: `Já existe um agente com o identificador slug "${slug}".` },
-        { status: 409 }
-      );
-    }
-
-    // Busca o modelo se especificado
-    let modelFkId: string | null = null;
-    if (preferredModelId) {
-      const modelInDb = await prisma.aiModel.findFirst({
-        where: {
-          OR: [{ id: preferredModelId }, { modelIdentifier: preferredModelId }],
-        },
+    // Se um projectId foi enviado, valida se o projeto pertence ao usuário
+    let validProjectId: string | null = null;
+    if (projectId) {
+      const proj = await prisma.project.findFirst({
+        where: { id: projectId, userId: user.id },
       });
-      if (modelInDb) modelFkId = modelInDb.id;
+      if (proj) {
+        validProjectId = proj.id;
+      }
     }
+
+    // Gera slug único seguro
+    const baseSlug = (rawSlug || name.toLowerCase().replace(/[^a-z0-9]/g, "-"))
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .trim() || "agente";
+
+    const uniqueSuffix = Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
+    const slug = `${baseSlug}-${uniqueSuffix}`;
 
     const created = await prisma.agent.create({
       data: {
-        name,
+        userId: user.id,
+        projectId: validProjectId,
+        name: name.trim(),
         slug,
-        role,
-        badge,
+        role: role.trim(),
+        badge: badge || "PERSONALIZADO",
         color,
-        description,
-        systemPrompt,
-        preferredModelId: modelFkId,
-        iconName,
-        category,
-        tools: JSON.stringify(tools),
-        allowedRoles: JSON.stringify(allowedRoles),
-        allowedPlans: JSON.stringify(allowedPlans),
+        avatar: avatar || "🤖",
+        description: description.trim(),
+        instructions: effectiveInstructions,
+        systemPrompt: effectiveInstructions,
+        modelPreference: preferredModel || "orvexa-prime",
+        iconName: iconName || "Bot",
+        category: category || "PERSONALIZADO",
+        tools: JSON.stringify(tools || []),
+        allowedRoles: JSON.stringify(["USER", "ADMIN"]),
+        allowedPlans: JSON.stringify(["ALL"]),
         isSystem: false,
         isActive: true,
+      },
+      include: {
+        project: { select: { id: true, name: true } },
       },
     });
 
     return NextResponse.json(
       {
         success: true,
-        agent: created,
-        message: `Agente "${name}" criado com sucesso pelo Administrador.`,
+        agent: {
+          ...created,
+          tools: typeof created.tools === "string" ? JSON.parse(created.tools) : created.tools,
+          preferredModel: created.modelPreference,
+          isOwner: true,
+        },
+        message: `Agente "${name}" criado com sucesso!`,
       },
       { status: 201 }
     );

@@ -83,6 +83,26 @@ interface ProjectDetail extends ProjectItem {
   conversations: Array<{ id: string; title: string; modelPreference: string; createdAt: string; updatedAt: string; messagesCount: number; lastMessage?: string }>;
 }
 
+interface AgentItem {
+  id: string;
+  slug: string;
+  name: string;
+  role: string;
+  badge?: string;
+  color?: string;
+  avatar?: string;
+  description: string;
+  instructions: string;
+  systemPrompt: string;
+  preferredModel: string;
+  projectId?: string | null;
+  project?: { id: string; name: string } | null;
+  tools?: any[];
+  isSystem: boolean;
+  isActive: boolean;
+  isOwner?: boolean;
+}
+
 interface AttachedFile {
   name: string;
   size: number;
@@ -163,6 +183,31 @@ export default function ChatModernPage() {
     [projects, activeProjectId]
   );
 
+  // Estados da Camada ORVEXA AGENTS
+  const [agents, setAgents] = useState<AgentItem[]>([]);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<AgentItem | null>(null);
+
+  // Formulário de Agente
+  const [agentFormName, setAgentFormName] = useState("");
+  const [agentFormRole, setAgentFormRole] = useState("Especialista");
+  const [agentFormDesc, setAgentFormDesc] = useState("");
+  const [agentFormAvatar, setAgentFormAvatar] = useState("🤖");
+  const [agentFormInstructions, setAgentFormInstructions] = useState("");
+  const [agentFormModel, setAgentFormModel] = useState("orvexa-prime");
+  const [agentFormProjectId, setAgentFormProjectId] = useState<string>("");
+  const [agentFormTools, setAgentFormTools] = useState<string[]>([]);
+  const [savingAgent, setSavingAgent] = useState(false);
+  const [duplicatingAgentId, setDuplicatingAgentId] = useState<string | null>(null);
+
+  // Agente ativo computado
+  const activeAgent = useMemo(
+    () => agents.find((a) => a.id === activeAgentId) || null,
+    [agents, activeAgentId]
+  );
+
   // Carrega favoritos do localStorage
   useEffect(() => {
     try {
@@ -231,10 +276,159 @@ export default function ChatModernPage() {
     }
   };
 
+  // Carrega lista de agentes
+  const fetchAgents = async () => {
+    try {
+      setLoadingAgents(true);
+      const res = await fetch("/api/ai/agents");
+      if (res.ok) {
+        const data = await res.json();
+        setAgents(data.agents || []);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar agentes:", err);
+    } finally {
+      setLoadingAgents(false);
+    }
+  };
+
   useEffect(() => {
     fetchProjects();
     fetchConversations();
+    fetchAgents();
   }, []);
+
+  // Seleciona um agente especialista
+  const handleSelectAgent = (agentId: string | null) => {
+    setActiveAgentId(agentId);
+    startNewConversation();
+    if (agentId) {
+      const selected = agents.find((a) => a.id === agentId);
+      if (selected?.projectId) {
+        setActiveProjectId(selected.projectId);
+        fetchProjectDetails(selected.projectId);
+      }
+      if (selected?.preferredModel && selected.preferredModel !== "orvexa-prime") {
+        setSelectedModel(selected.preferredModel);
+      }
+    }
+  };
+
+  // Abrir modal para criar novo agente
+  const handleOpenCreateAgent = () => {
+    setEditingAgent(null);
+    setAgentFormName("");
+    setAgentFormRole("Especialista");
+    setAgentFormDesc("");
+    setAgentFormAvatar("🤖");
+    setAgentFormInstructions("");
+    setAgentFormModel("orvexa-prime");
+    setAgentFormProjectId(activeProjectId || "");
+    setAgentFormTools([]);
+    setAgentModalOpen(true);
+  };
+
+  // Abrir modal para editar agente existente
+  const handleOpenEditAgent = (agent: AgentItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingAgent(agent);
+    setAgentFormName(agent.name);
+    setAgentFormRole(agent.role || "Especialista");
+    setAgentFormDesc(agent.description || "");
+    setAgentFormAvatar(agent.avatar || "🤖");
+    setAgentFormInstructions(agent.instructions || agent.systemPrompt || "");
+    setAgentFormModel(agent.preferredModel || "orvexa-prime");
+    setAgentFormProjectId(agent.projectId || "");
+    setAgentFormTools(
+      Array.isArray(agent.tools)
+        ? agent.tools.map((t) => (typeof t === "string" ? t : t.id || t.name))
+        : []
+    );
+    setAgentModalOpen(true);
+  };
+
+  // Salvar agente (POST ou PATCH)
+  const handleSaveAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agentFormName.trim() || !agentFormDesc.trim()) return;
+
+    try {
+      setSavingAgent(true);
+      const payload = {
+        name: agentFormName.trim(),
+        role: agentFormRole.trim(),
+        description: agentFormDesc.trim(),
+        avatar: agentFormAvatar,
+        instructions: agentFormInstructions.trim() || agentFormDesc.trim(),
+        preferredModel: agentFormModel,
+        projectId: agentFormProjectId || null,
+        tools: agentFormTools,
+      };
+
+      const url = editingAgent ? `/api/ai/agents/${editingAgent.id}` : "/api/ai/agents";
+      const method = editingAgent ? "PATCH" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        await fetchAgents();
+        if (!editingAgent && data.agent) {
+          setActiveAgentId(data.agent.id);
+        }
+        setAgentModalOpen(false);
+      }
+    } catch (err) {
+      console.error("Erro ao salvar agente:", err);
+    } finally {
+      setSavingAgent(false);
+    }
+  };
+
+  // Duplicar agente
+  const handleDuplicateAgent = async (agentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      setDuplicatingAgentId(agentId);
+      const res = await fetch(`/api/ai/agents/${agentId}/duplicate`, {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await fetchAgents();
+        if (data.agent) {
+          setActiveAgentId(data.agent.id);
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao duplicar agente:", err);
+    } finally {
+      setDuplicatingAgentId(null);
+    }
+  };
+
+  // Excluir agente
+  const handleDeleteAgent = async (agentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Deseja realmente excluir este agente?")) return;
+    try {
+      const res = await fetch(`/api/ai/agents/${agentId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        if (activeAgentId === agentId) {
+          setActiveAgentId(null);
+        }
+        await fetchAgents();
+      }
+    } catch (err) {
+      console.error("Erro ao excluir agente:", err);
+    }
+  };
 
   // Seleciona um projeto (ou null para Geral)
   const handleSelectProject = (projectId: string | null) => {
@@ -638,6 +832,7 @@ export default function ChatModernPage() {
           conversationId: activeConversationId || undefined,
           modelPreference: selectedModel,
           projectId: activeProjectId || undefined,
+          agentId: activeAgentId || undefined,
           hasFiles: fileUploadedOk || (userMessage.attachedFileNames && userMessage.attachedFileNames.length > 0),
         }),
       });
@@ -911,6 +1106,106 @@ export default function ChatModernPage() {
           </div>
         </div>
 
+        {/* Seção: 🤖 Agentes Especialistas */}
+        <div className="px-3 pt-2 pb-2 border-b border-slate-800/80 space-y-1.5 shrink-0">
+          <div className="flex items-center justify-between px-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            <span className="flex items-center gap-1.5">
+              <Bot className="w-3.5 h-3.5 text-cyan-400" />
+              🤖 Agentes
+            </span>
+            <button
+              type="button"
+              onClick={handleOpenCreateAgent}
+              className="p-1 px-1.5 rounded-md text-slate-400 hover:text-cyan-300 hover:bg-slate-800 transition-colors flex items-center gap-1 text-[11px] font-medium"
+              title="Criar novo agente especialista personalizado"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Novo</span>
+            </button>
+          </div>
+
+          <div className="space-y-0.5 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800 pr-0.5">
+            {/* Opção Padrão (Sem Agente) */}
+            <button
+              type="button"
+              onClick={() => handleSelectAgent(null)}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-xs transition-all ${
+                activeAgentId === null
+                  ? "bg-slate-800/90 text-white font-medium border border-slate-700/60"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/60"
+              }`}
+            >
+              <span className="flex items-center gap-2 truncate">
+                <Sparkles className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="truncate">Assistente Padrão</span>
+              </span>
+            </button>
+
+            {/* Lista de Agentes Disponíveis */}
+            {agents.map((ag) => {
+              const isSelected = activeAgentId === ag.id;
+              return (
+                <div
+                  key={ag.id}
+                  className={`group relative flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-all ${
+                    isSelected
+                      ? "bg-cyan-500/15 text-cyan-300 font-medium border border-cyan-500/30"
+                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/60"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSelectAgent(ag.id)}
+                    className="flex-1 flex items-center gap-2 truncate text-left"
+                    title={ag.description || ag.name}
+                  >
+                    <span className="text-sm shrink-0">{ag.avatar || "🤖"}</span>
+                    <div className="truncate">
+                      <div className="truncate text-xs font-medium leading-tight">{ag.name}</div>
+                      <div className="text-[10px] text-slate-500 truncate leading-tight">{ag.role}</div>
+                    </div>
+                  </button>
+
+                  {/* Ações Rápidas: Duplicar, Editar, Excluir */}
+                  <div className="flex items-center gap-1 shrink-0 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={(e) => handleDuplicateAgent(ag.id, e)}
+                      disabled={duplicatingAgentId === ag.id}
+                      className="p-1 text-slate-400 hover:text-cyan-300 rounded"
+                      title="Duplicar agente"
+                    >
+                      <Copy className="w-3 h-3" />
+                    </button>
+
+                    {ag.isOwner && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenEditAgent(ag, e)}
+                        className="p-1 text-slate-400 hover:text-white rounded"
+                        title="Editar agente"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                    )}
+
+                    {ag.isOwner && !ag.isSystem && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteAgent(ag.id, e)}
+                        className="p-1 text-slate-400 hover:text-red-400 rounded"
+                        title="Excluir agente"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Lista de Conversas com Agrupamento Temporal */}
         <div className="flex-1 overflow-y-auto p-2 space-y-4 text-xs scrollbar-thin scrollbar-thumb-slate-800">
           {loadingHistory && conversations.length === 0 ? (
@@ -1107,6 +1402,22 @@ export default function ChatModernPage() {
                 </span>
               </button>
             )}
+
+            {/* Chip do Agente Ativo no Header */}
+            {activeAgent && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-medium shadow-sm">
+                <span className="text-sm shrink-0">{activeAgent.avatar || "🤖"}</span>
+                <span className="max-w-[120px] sm:max-w-[180px] truncate">{activeAgent.name}</span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectAgent(null)}
+                  className="p-0.5 hover:text-white rounded hover:bg-cyan-500/20 text-cyan-400 transition-colors ml-0.5"
+                  title="Desativar especialista e voltar ao ORVEXA Geral"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Ações da Direita */}
@@ -1155,6 +1466,16 @@ export default function ChatModernPage() {
                       <span>Projeto: <strong>{activeProject.name}</strong></span>
                       <span className="text-purple-400">• {(activeProject.memoriesCount || 0)} memórias salvas</span>
                     </button>
+                  </div>
+                )}
+
+                {activeAgent && (
+                  <div className="pt-1">
+                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 text-xs">
+                      <span className="text-sm">{activeAgent.avatar || "🤖"}</span>
+                      <span>Especialista Ativo: <strong>{activeAgent.name}</strong></span>
+                      <span className="text-cyan-400">• {activeAgent.role}</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1749,6 +2070,167 @@ export default function ChatModernPage() {
                 Concluir
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------- */}
+      {/* MODAL: NOVO / EDITAR AGENTE ESPECIALISTA                        */}
+      {/* --------------------------------------------------------------- */}
+      {agentModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-[#0B101D] border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-lg">
+                  {agentFormAvatar}
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white">
+                    {editingAgent ? `Editar: ${editingAgent.name}` : "Novo Agente Especialista"}
+                  </h3>
+                  <p className="text-xs text-slate-400">Configure persona, instruções e modelo preferencial</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAgentModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAgent} className="space-y-4 flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {/* Seletor Rápido de Avatar / Emoji */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">Avatar do Agente</label>
+                <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-900 border border-slate-800">
+                  {["🤖", "💰", "🚀", "💻", "⚖️", "🎓", "📊", "🔬", "🎨", "💼", "📈", "🧠", "⚡", "✍️", "🛡️"].map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setAgentFormAvatar(emoji)}
+                      className={`w-8 h-8 rounded-lg text-sm flex items-center justify-center transition-all ${
+                        agentFormAvatar === emoji
+                          ? "bg-cyan-500/20 border border-cyan-500/50 scale-110 shadow-sm"
+                          : "hover:bg-slate-800"
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Nome do Agente <span className="text-cyan-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Auditor Financeiro, Consultor SEO..."
+                  value={agentFormName}
+                  onChange={(e) => setAgentFormName(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-cyan-500/60 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Função / Especialidade
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Valuation, DRE e Indicadores Financeiros"
+                  value={agentFormRole}
+                  onChange={(e) => setAgentFormRole(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-cyan-500/60 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Descrição Sucinta <span className="text-cyan-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Especialista em modelagem financeira e valuation para startups e PMEs"
+                  value={agentFormDesc}
+                  onChange={(e) => setAgentFormDesc(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-cyan-500/60 transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Instruções Personalizadas (Persona & Comportamento) <span className="text-cyan-400">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Ex: Você é o Auditor Financeiro da empresa. Sempre exija fundamentação em números, estruture tabelas comparativas, use tom executivo..."
+                  value={agentFormInstructions}
+                  onChange={(e) => setAgentFormInstructions(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs placeholder-slate-500 focus:outline-none focus:border-cyan-500/60 transition-colors resize-none leading-relaxed font-sans"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Modelo Preferencial
+                  </label>
+                  <select
+                    value={agentFormModel}
+                    onChange={(e) => setAgentFormModel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs focus:outline-none focus:border-cyan-500/60"
+                  >
+                    <option value="orvexa-prime">ORVEXA AUTO (Recomendado)</option>
+                    <option value="openai">GPT (OpenAI)</option>
+                    <option value="claude">Claude (Anthropic)</option>
+                    <option value="gemini">Gemini (Google)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">
+                    Projeto Vinculado (Opcional)
+                  </label>
+                  <select
+                    value={agentFormProjectId}
+                    onChange={(e) => setAgentFormProjectId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-xs focus:outline-none focus:border-cyan-500/60"
+                  >
+                    <option value="">Nenhum (Disponível em qualquer chat)</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAgentModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingAgent || !agentFormName.trim() || !agentFormDesc.trim()}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-all disabled:opacity-50"
+                >
+                  {savingAgent ? "Salvando..." : editingAgent ? "Salvar Alterações" : "Criar Agente"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

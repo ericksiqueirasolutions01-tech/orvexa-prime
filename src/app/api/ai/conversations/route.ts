@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("q")?.trim() || "";
     const projectIdParam = searchParams.get("projectId");
+    const agentIdParam = searchParams.get("agentId");
 
     const projectFilter =
       projectIdParam === "none"
@@ -29,10 +30,18 @@ export async function GET(req: NextRequest) {
         ? { projectId: projectIdParam }
         : {};
 
+    const agentFilter =
+      agentIdParam === "none"
+        ? { agentId: null }
+        : agentIdParam
+        ? { agentId: agentIdParam }
+        : {};
+
     const conversations = await prisma.conversation.findMany({
       where: {
         userId: user.id,
         ...projectFilter,
+        ...agentFilter,
         ...(search
           ? {
               title: {
@@ -42,6 +51,9 @@ export async function GET(req: NextRequest) {
           : {}),
       },
       include: {
+        agent: {
+          select: { id: true, name: true, avatar: true, iconName: true },
+        },
         messages: {
           take: 1,
           orderBy: { createdAt: "desc" },
@@ -60,6 +72,7 @@ export async function GET(req: NextRequest) {
       title: conv.title,
       modelPreference: conv.modelPreference,
       agentId: conv.agentId,
+      agent: conv.agent,
       projectId: conv.projectId,
       createdAt: conv.createdAt,
       updatedAt: conv.updatedAt,
