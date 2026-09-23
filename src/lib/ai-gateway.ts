@@ -4,6 +4,7 @@ import { appCache } from "./cache";
 import { buildMemoryContextPrompt, extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 import { AIProviderService } from "@/ai/services/provider.service";
 import { classifyAndRoute, logRouterDecision, SmartRouterDecision } from "@/ai/gateway/smart-router";
+import { AIMonitorService } from "@/ai/monitoring/ai-monitor.service";
 
 export interface ChatMessageInput {
   role: "user" | "assistant" | "system";
@@ -408,6 +409,30 @@ DIRETRIZES FUNDAMENTAIS:
     };
   }
 
+  // 1.1 Resiliência Operacional: Consulta o AI Monitor para verificar a saúde do provedor
+  const healthCheck = await AIMonitorService.getHealthyFallbackProvider(decision.providerSlug).catch(() => ({
+    provider: decision.providerSlug,
+    isFallback: false,
+  }));
+
+  if (healthCheck.isFallback && healthCheck.provider !== decision.providerSlug) {
+    const fallbackModel = await prisma.aiModel.findFirst({
+      where: { provider: { slug: healthCheck.provider }, isActive: true },
+      include: { provider: true },
+    });
+    if (fallbackModel) {
+      console.log(`[Smart Router Resilience] Fallback preventivo acionado: "${decision.providerSlug}" -> "${healthCheck.provider}"`);
+      decision = {
+        ...decision,
+        providerSlug: healthCheck.provider,
+        modelIdentifier: fallbackModel.modelIdentifier,
+        modelName: fallbackModel.name,
+        modelId: fallbackModel.id,
+        reason: `${decision.reason} [${(healthCheck as any).reason || "Fallback automático"}]`,
+      };
+    }
+  }
+
   // 2. Busca chaves ativas do provedor selecionado com validação estrita de capacidade e quota
   let keys = await getHealthyApiKeys(decision.providerSlug, decision.requiredCapability);
 
@@ -498,6 +523,19 @@ DIRETRIZES FUNDAMENTAIS:
           },
         });
 
+        // Registra histórico na tabela ai_usage_logs (AI MONITOR)
+        AIMonitorService.recordUsageLog({
+          userId,
+          provider: decision.providerSlug,
+          model: decision.modelIdentifier,
+          tokensInput: estimatedInputTokens,
+          tokensOutput: 250,
+          latencyMs: latency,
+          cost: estimatedCostCents / 100,
+          statusCode: 200,
+          status: isFailover ? "FALLBACK" : "SUCCESS",
+        }).catch(() => {});
+
         return {
           stream,
           decision,
@@ -561,6 +599,19 @@ DIRETRIZES FUNDAMENTAIS:
           },
         });
 
+        // Registra histórico na tabela ai_usage_logs (AI MONITOR)
+        AIMonitorService.recordUsageLog({
+          userId,
+          provider: altSlug,
+          model: altModelIdentifier,
+          tokensInput: estimatedInputTokens,
+          tokensOutput: 250,
+          latencyMs: latency,
+          cost: 0.0015,
+          statusCode: 200,
+          status: "FALLBACK",
+        }).catch(() => {});
+
         return {
           stream,
           decision: {
@@ -608,6 +659,19 @@ DIRETRIZES FUNDAMENTAIS:
       status: "SUCCESS",
     },
   });
+
+  // Registra histórico na tabela ai_usage_logs (AI MONITOR)
+  AIMonitorService.recordUsageLog({
+    userId,
+    provider: decision.providerSlug,
+    model: decision.modelIdentifier,
+    tokensInput: estimatedInputTokens,
+    tokensOutput: 300,
+    latencyMs: latency,
+    cost: 0.0005,
+    statusCode: 200,
+    status: "SUCCESS",
+  }).catch(() => {});
 
   return {
     stream: simulatedStream,
