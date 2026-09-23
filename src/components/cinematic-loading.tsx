@@ -358,9 +358,12 @@ export function CinematicLoading({
 
   // Função para pular animação
   const handleSkip = () => {
+    if (onComplete) {
+      onComplete();
+      return;
+    }
     setScene(6);
     setCompleted(true);
-    if (onComplete) onComplete();
   };
 
   return (
@@ -512,13 +515,23 @@ export function CinematicLoading({
                 {/* Botões de Ação */}
                 {showNavigationControls && (
                   <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
-                    <Link
-                      href={autoRedirectUrl}
-                      className="px-6 py-3 rounded-xl font-bold text-sm text-black bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 hover:brightness-110 shadow-neon-cyan flex items-center gap-2 transition-all hover:scale-105"
-                    >
-                      <span>Acessar Plataforma</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
+                    {onComplete ? (
+                      <button
+                        onClick={onComplete}
+                        className="px-6 py-3 rounded-xl font-bold text-sm text-black bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 hover:brightness-110 shadow-neon-cyan flex items-center gap-2 transition-all hover:scale-105"
+                      >
+                        <span>Acessar Plataforma</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <Link
+                        href={autoRedirectUrl}
+                        className="px-6 py-3 rounded-xl font-bold text-sm text-black bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 hover:brightness-110 shadow-neon-cyan flex items-center gap-2 transition-all hover:scale-105"
+                      >
+                        <span>Acessar Plataforma</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </Link>
+                    )}
 
                     <button
                       onClick={handleReplay}

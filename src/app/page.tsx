@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Navbar } from "@/components/Navbar";
+import { CinematicLoading } from "@/components/cinematic-loading";
 import {
   Sparkles,
   Zap,
@@ -21,6 +23,29 @@ import {
 } from "lucide-react";
 
 export default function HomePage() {
+  const [showCinematicIntro, setShowCinematicIntro] = useState<boolean>(true);
+  const [mounted, setMounted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const seen = sessionStorage.getItem("orvexa_intro_seen");
+      const params = new URLSearchParams(window.location.search);
+      // Se já viu nesta sessão ou passou parâmetro ?intro=false, pula direto
+      if (seen === "true" || params.get("intro") === "false") {
+        setShowCinematicIntro(false);
+      }
+    } catch {
+      // Ignora erro de storage se houver
+    }
+  }, []);
+
+  const handleFinishIntro = () => {
+    try {
+      sessionStorage.setItem("orvexa_intro_seen", "true");
+    } catch {}
+    setShowCinematicIntro(false);
+  };
   const agents = [
     {
       name: "ORVEXA DEV",
@@ -122,6 +147,18 @@ export default function HomePage() {
     },
   ];
 
+  if (mounted && showCinematicIntro) {
+    return (
+      <main className="w-full h-screen overflow-hidden bg-[#030712] relative">
+        <CinematicLoading
+          onComplete={handleFinishIntro}
+          autoRedirectUrl="/dashboard/chat"
+          showNavigationControls={true}
+        />
+      </main>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#080C14] text-slate-100 bg-grid relative overflow-hidden">
       <Navbar />
@@ -164,13 +201,13 @@ export default function HomePage() {
           >
             Acessar Minha Conta
           </Link>
-          <Link
-            href="/loading"
-            className="w-full sm:w-auto px-6 py-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-transparent hover:bg-white/5 text-amber-300 border border-amber-500/30 font-semibold text-base backdrop-blur-md transition-all flex items-center justify-center gap-2 shadow-sm shadow-amber-500/10 hover:border-amber-400/60"
+          <button
+            onClick={() => setShowCinematicIntro(true)}
+            className="w-full sm:w-auto px-6 py-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-cyan-500/10 to-transparent hover:bg-white/5 text-amber-300 border border-amber-500/30 font-semibold text-base backdrop-blur-md transition-all flex items-center justify-center gap-2 shadow-sm shadow-amber-500/10 hover:border-amber-400/60 cursor-pointer"
           >
             <Sparkles className="w-4 h-4 text-amber-400" />
             Experiência Cinematográfica
-          </Link>
+          </button>
         </div>
 
         {/* Logo Banner & Stats */}
