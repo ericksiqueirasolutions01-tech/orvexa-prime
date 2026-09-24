@@ -23,16 +23,34 @@ export async function POST(req: Request) {
 
     // Se fornecido keyId, recupera e decripta a chave do banco com segurança
     if (keyId) {
-      targetKeyRecord = await prisma.apiKey.findUnique({
+      const accountRecord = await prisma.aiProviderAccount.findUnique({
         where: { id: keyId },
-        include: { provider: true },
       });
-      if (!targetKeyRecord) {
-        return NextResponse.json({ error: "Chave não encontrada." }, { status: 404 });
+
+      if (accountRecord) {
+        targetKeyRecord = { isAccount: true, record: accountRecord };
+        const encKey = accountRecord.encryptedApiKey || accountRecord.encryptedKey;
+        if (encKey && accountRecord.iv && accountRecord.authTag) {
+          trimmedKey = decryptApiKey(encKey, accountRecord.iv, accountRecord.authTag);
+        }
+        baseUrl = accountRecord.baseUrl || accountRecord.customBaseUrl || "";
+        detectedProvider = accountRecord.provider || "openai";
+      } else {
+        const apiKeyRecord = await prisma.apiKey.findUnique({
+          where: { id: keyId },
+          include: { provider: true },
+        });
+        if (apiKeyRecord) {
+          targetKeyRecord = { isAccount: false, record: apiKeyRecord };
+          trimmedKey = decryptApiKey(apiKeyRecord.encryptedKey, apiKeyRecord.iv, apiKeyRecord.authTag);
+          baseUrl = apiKeyRecord.customBaseUrl || apiKeyRecord.provider.baseUrl || "";
+          detectedProvider = apiKeyRecord.provider.slug;
+        }
       }
-      trimmedKey = decryptApiKey(targetKeyRecord.encryptedKey, targetKeyRecord.iv, targetKeyRecord.authTag);
-      baseUrl = targetKeyRecord.customBaseUrl || targetKeyRecord.provider.baseUrl || "";
-      detectedProvider = targetKeyRecord.provider.slug;
+
+      if (!targetKeyRecord) {
+        return NextResponse.json({ error: "Chave ou conta de API não encontrada." }, { status: 404 });
+      }
     }
 
     if (!trimmedKey) {
@@ -49,24 +67,49 @@ export async function POST(req: Request) {
 
     // Se o teste foi realizado em uma chave já cadastrada no banco, atualiza status
     if (targetKeyRecord) {
-      if (testResult.success) {
-        await prisma.apiKey.update({
-          where: { id: targetKeyRecord.id },
-          data: {
-            status: "ACTIVE",
-            errorCount: 0,
-            quarantinedUntil: null,
-            lastUsedAt: new Date(),
-          },
-        }).catch(() => {});
+      if (targetKeyRecord.isAccount) {
+        const acc = targetKeyRecord.record;
+        if (testResult.success) {
+          await prisma.aiProviderAccount.update({
+            where: { id: acc.id },
+            data: {
+              status: "ACTIVE",
+              lastTestedAt: new Date(),
+              lastLatencyMs: testResult.latencyMs || 0,
+              modelsDetected: testResult.detectedModels ? JSON.stringify(testResult.detectedModels) : undefined,
+            },
+          }).catch(() => {});
+        } else {
+          await prisma.aiProviderAccount.update({
+            where: { id: acc.id },
+            data: {
+              status: testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR",
+              lastTestedAt: new Date(),
+              lastLatencyMs: testResult.latencyMs || 0,
+            },
+          }).catch(() => {});
+        }
       } else {
-        await prisma.apiKey.update({
-          where: { id: targetKeyRecord.id },
-          data: {
-            status: testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR",
-            errorCount: { increment: 1 },
-          },
-        }).catch(() => {});
+        const apiKey = targetKeyRecord.record;
+        if (testResult.success) {
+          await prisma.apiKey.update({
+            where: { id: apiKey.id },
+            data: {
+              status: "ACTIVE",
+              errorCount: 0,
+              quarantinedUntil: null,
+              lastUsedAt: new Date(),
+            },
+          }).catch(() => {});
+        } else {
+          await prisma.apiKey.update({
+            where: { id: apiKey.id },
+            data: {
+              status: testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR",
+              errorCount: { increment: 1 },
+            },
+          }).catch(() => {});
+        }
       }
     }
 

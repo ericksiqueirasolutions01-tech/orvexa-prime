@@ -42,45 +42,66 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 1. Identifica a API e Chaves Ativas
+    // 1. Identifica a API e Chaves Ativas na tabela mestra oficial
+    const activeAccount = await prisma.aiProviderAccount.findFirst({
+      where: { status: { in: ["ACTIVE", "CONNECTED"] } },
+      orderBy: { updatedAt: "desc" },
+    });
+
     const activeApiKeys = await prisma.apiKey.findMany({
       where: { status: "ACTIVE" },
       include: { provider: true },
       orderBy: { updatedAt: "desc" },
     });
 
-    const activeAccount = await prisma.aiProviderAccount.findFirst({
-      where: { status: "CONNECTED" },
-      orderBy: { updatedAt: "desc" },
-    });
-
     const primaryKey = activeApiKeys[0];
     const activeProvider = primaryKey?.provider;
 
-    const activeProviderSlugs = new Set(
-      activeApiKeys.map((k) => (k.provider?.slug || "").toLowerCase())
-    );
+    const activeProviderSlugs = new Set<string>();
+    if (activeAccount?.provider) activeProviderSlugs.add(activeAccount.provider.toLowerCase());
+    activeApiKeys.forEach((k) => {
+      if (k.provider?.slug) activeProviderSlugs.add(k.provider.slug.toLowerCase());
+    });
 
     // Endpoint configurado
     const activeEndpoint =
+      activeAccount?.baseUrl ||
       activeAccount?.customBaseUrl ||
+      primaryKey?.customBaseUrl ||
       activeProvider?.baseUrl ||
       process.env.OPENAI_BASE_URL ||
       "https://api.miraiapi.com/v1";
 
+    const isConfigured = !!activeAccount || activeApiKeys.length > 0;
+    const totalQuota = activeAccount?.quotaLimit || activeAccount?.totalQuota || primaryKey?.tokenLimitMonthly || 10000000;
+    const usedQuota = activeAccount?.tokensUsed || activeAccount?.usedQuota || primaryKey?.tokensUsedMonth || 0;
+    const remainingQuota = activeAccount?.tokensRemaining ?? activeAccount?.remainingQuota ?? Math.max(0, totalQuota - usedQuota);
+
     const apiInfo = {
-      isConfigured: activeApiKeys.length > 0,
-      name: primaryKey?.name || activeAccount?.accountName || "Mirai OpenAI Compatível (Produção)",
-      provider: activeProvider?.name || "OpenAI Compatível (Mirai Gateway)",
-      providerSlug: activeProvider?.slug || "openai",
+      isConfigured,
+      name: activeAccount?.name || activeAccount?.accountName || primaryKey?.name || "API Produção Ativa",
+      provider: activeAccount?.provider === "openai" ? "OpenAI Compatible" : (activeAccount?.provider || activeProvider?.name || "OpenAI Compatible"),
+      providerSlug: activeAccount?.provider || activeProvider?.slug || "openai",
       endpoint: activeEndpoint,
-      status: activeApiKeys.length > 0 ? ("ONLINE" as const) : ("OFFLINE" as const),
-      keyHint: primaryKey?.keyHint || activeAccount?.apiKeyMasked || "...klFI",
-      totalQuota: activeAccount?.totalQuota || 10000000,
-      usedQuota: activeAccount?.usedQuota || 0,
-      remainingQuota: activeAccount?.remainingQuota || 10000000,
-      lastSync: activeAccount?.lastSync || new Date().toISOString(),
+      status: isConfigured ? ("ONLINE" as const) : ("OFFLINE" as const),
+      keyHint: activeAccount?.keyHint || activeAccount?.apiKeyMasked || primaryKey?.keyHint || "...key",
+      totalQuota,
+      usedQuota,
+      remainingQuota,
+      lastSync: activeAccount?.lastSync?.toISOString() || activeAccount?.updatedAt?.toISOString() || new Date().toISOString(),
     };
+
+    // Parse de modelos detectados da conta ativa
+    let accountDetectedModels: string[] = [];
+    try {
+      accountDetectedModels = JSON.parse(activeAccount?.modelsDetected || activeAccount?.detectedModels || "[]");
+    } catch {}
+
+    // Parse de capacidades da conta ativa
+    let accountCapabilities: string[] = [];
+    try {
+      accountCapabilities = JSON.parse(activeAccount?.capabilities || "[]");
+    } catch {}
 
     // 2. Identifica os Modelos Ativos e Detectados
     const activeModelsDb = await prisma.aiModel.findMany({
@@ -89,9 +110,10 @@ export async function GET(req: NextRequest) {
       orderBy: { name: "asc" },
     });
 
-    const activeModelIds = new Set(
-      activeModelsDb.map((m) => m.modelIdentifier.toLowerCase())
-    );
+    const activeModelIds = new Set<string>([
+      ...activeModelsDb.map((m) => m.modelIdentifier.toLowerCase()),
+      ...accountDetectedModels.map((m) => m.toLowerCase()),
+    ]);
 
     const detectedModels = activeModelsDb.map((m) => {
       let friendlyName = m.name;
@@ -131,6 +153,7 @@ export async function GET(req: NextRequest) {
 
     // 3. Avaliação de Capacidades por Tipo
     const hasTextModel =
+      accountCapabilities.includes("TEXTO") ||
       activeModelIds.has("gpt-6-sol") ||
       activeModelIds.has("gpt-5.6-sol") ||
       activeModelIds.has("gpt-5.6-terra") ||
@@ -138,15 +161,19 @@ export async function GET(req: NextRequest) {
       activeModelIds.size > 0;
 
     const hasCodeModel =
+      accountCapabilities.includes("CODIGO") ||
       activeModelIds.has("gpt-5.6-sol") ||
-      activeModelsDb.some((m) => m.capabilities?.includes("code"));
+      Array.from(activeModelIds).some((id) => id.includes("code") || id.includes("sol") || id.includes("codex") || id.includes("dev")) ||
+      activeModelsDb.some((m) => m.capabilities?.includes("code") || m.capabilities?.includes("CODIGO"));
 
     const hasDocsModel =
+      accountCapabilities.includes("DOCUMENTO") ||
       activeModelIds.has("gpt-5.6-terra") ||
-      activeModelsDb.some((m) => m.capabilities?.includes("documents") || m.capabilities?.includes("rag"));
+      Array.from(activeModelIds).some((id) => id.includes("terra") || id.includes("doc") || id.includes("rag")) ||
+      activeModelsDb.some((m) => m.capabilities?.includes("documents") || m.capabilities?.includes("rag") || m.capabilities?.includes("DOCUMENTO"));
 
-    // Imagem: Mirai é gateway OpenAI-compatível de LLM texto, DALL-E/Midjourney requer chave gráfica
-    const hasImageModel = activeModelsDb.some(
+    // Imagem: Mirai/Clipoos é gateway OpenAI-compatível de LLM texto, difusão requer chave especializada
+    const hasImageModel = accountCapabilities.includes("IMAGEM") || activeModelsDb.some(
       (m) =>
         m.modelIdentifier.toLowerCase().includes("dall-e") ||
         m.modelIdentifier.toLowerCase().includes("flux") ||
@@ -154,7 +181,7 @@ export async function GET(req: NextRequest) {
     ) && activeProviderSlugs.has("openai_image");
 
     // Vídeo: Requer Runway / Sora / Veo
-    const hasVideoModel = false;
+    const hasVideoModel = accountCapabilities.includes("VIDEO");
 
     const capabilities: CapabilityItem[] = [
       {
@@ -163,9 +190,7 @@ export async function GET(req: NextRequest) {
         supported: hasTextModel,
         icon: "MessageSquare",
         description: "Geração textual fluida, conversação multilíngue, raciocínio lógico e Smart Router.",
-        activeModels: ["gpt-6-sol", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].filter((id) =>
-          activeModelIds.has(id)
-        ),
+        activeModels: Array.from(activeModelIds),
         reason: hasTextModel ? undefined : "Nenhum modelo de processamento de linguagem natural ativo.",
       },
       {
@@ -174,8 +199,8 @@ export async function GET(req: NextRequest) {
         supported: hasCodeModel,
         icon: "Code2",
         description: "Geração, depuração, refatoração de código TypeScript/Python e modelagem Prisma.",
-        activeModels: ["gpt-5.6-sol"].filter((id) => activeModelIds.has(id)),
-        reason: hasCodeModel ? undefined : "Requer o modelo gpt-5.6-sol ou equivalente ativo no catálogo.",
+        activeModels: Array.from(activeModelIds).filter((id) => id.includes("sol") || id.includes("code") || id.includes("dev")),
+        reason: hasCodeModel ? undefined : "Requer modelo com especialização em código ativo.",
       },
       {
         name: "Análise de Documentos (RAG)",
@@ -183,8 +208,8 @@ export async function GET(req: NextRequest) {
         supported: hasDocsModel,
         icon: "FileText",
         description: "Processamento e extração contextual de PDFs, TXTs, planilhas e busca semântica.",
-        activeModels: ["gpt-5.6-terra"].filter((id) => activeModelIds.has(id)),
-        reason: hasDocsModel ? undefined : "Requer o modelo gpt-5.6-terra ou equivalente ativo no catálogo.",
+        activeModels: Array.from(activeModelIds).filter((id) => id.includes("terra") || id.includes("doc")),
+        reason: hasDocsModel ? undefined : "Requer modelo com suporte a leitura de documentos e arquivos ativo.",
       },
       {
         name: "Geração de Imagens",

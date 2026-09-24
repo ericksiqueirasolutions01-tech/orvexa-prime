@@ -349,8 +349,9 @@ async function resolveModelRecord(
 
   try {
     const cached = await appCache.getOrSet(
-      `model:info:${identifierCandidate}`,
+      `model:info:${identifierCandidate}:${fallbackCandidates.join(",")}`,
       async () => {
+        // 1. Tenta encontrar diretamente entre os modelos ativos compatíveis
         const models = await prisma.aiModel.findMany({
           where: {
             modelIdentifier: { in: allCandidates },
@@ -359,16 +360,59 @@ async function resolveModelRecord(
           include: { provider: true },
         });
 
-        if (models.length === 0) return null;
+        if (models.length > 0) {
+          models.sort(
+            (a, b) => allCandidates.indexOf(a.modelIdentifier) - allCandidates.indexOf(b.modelIdentifier)
+          );
+          return models[0];
+        }
 
-        // Ordena estritamente pela prioridade definida em allCandidates
-        models.sort(
-          (a, b) => allCandidates.indexOf(a.modelIdentifier) - allCandidates.indexOf(b.modelIdentifier)
-        );
+        // 2. Se nenhum candidato direto foi encontrado, busca modelos detectados da conta ativa em ai_provider_accounts
+        const activeAccount = await prisma.aiProviderAccount.findFirst({
+          where: { status: "ACTIVE" },
+          orderBy: { priority: "asc" },
+        });
 
-        return models[0];
+        if (activeAccount) {
+          let detected: string[] = [];
+          try {
+            detected = JSON.parse(activeAccount.modelsDetected || activeAccount.detectedModels || "[]");
+          } catch {}
+
+          if (detected.length > 0) {
+            // Tenta casar candidatos com os modelos detectados
+            for (const cand of allCandidates) {
+              const matched = detected.find((d) => d.toLowerCase() === cand.toLowerCase());
+              if (matched) {
+                return {
+                  id: activeAccount.id,
+                  name: matched,
+                  modelIdentifier: matched,
+                  provider: { slug: activeAccount.provider },
+                };
+              }
+            }
+
+            // Se nenhum casou, escolhe o primeiro modelo detectado da API ativa (evita chamar modelo inexistente)
+            const fallbackDetected = detected[0];
+            return {
+              id: activeAccount.id,
+              name: fallbackDetected,
+              modelIdentifier: fallbackDetected,
+              provider: { slug: activeAccount.provider },
+            };
+          }
+        }
+
+        // 3. Fallback para qualquer modelo ativo cadastrado
+        const anyActiveModel = await prisma.aiModel.findFirst({
+          where: { isActive: true },
+          include: { provider: true },
+        });
+
+        return anyActiveModel || null;
       },
-      120
+      60
     );
 
     if (cached) {
@@ -380,7 +424,7 @@ async function resolveModelRecord(
       };
     }
   } catch {
-    // Continua para fallback estático
+    // Continua para fallback seguro
   }
 
   const namesMap: Record<string, string> = {
@@ -389,13 +433,8 @@ async function resolveModelRecord(
     "gpt-5.6-terra": "GPT-5.6 Terra",
     "gpt-5.6-luna": "GPT-5.6 Luna",
     "gpt-6-astra": "GPT-6 Astra",
-    "claude-sonnet-5": "Claude Sonnet 5",
-    "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
     "gpt-4o": "GPT-4o",
     "gpt-4o-mini": "GPT-4o Mini",
-    "gemini-3-flash-preview": "Gemini 3 Flash",
-    "gemini-1.5-pro": "Gemini 1.5 Pro",
-    "gemini-3.1-flash-lite-preview": "Gemini 3.1 Flash Lite",
   };
 
   return {
@@ -427,12 +466,12 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
     ]);
     decision = {
       categoria: "IMAGEM",
-      provedor: "google",
+      provedor: model.provider,
       modeloIdentificador: model.identifier,
       modeloNome: model.name,
       modeloId: model.id,
       motivoEscolha:
-        "Entrada multimodal ou processamento visual detectado. Priorizado Google Gemini pela arquitetura nativa para visão e imagens.",
+        "Entrada multimodal ou processamento visual detectado. Priorizado modelo com maior afinidade visual e espacial.",
       capacidadeNecessaria: "IMAGEM",
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
@@ -465,12 +504,12 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
     ]);
     decision = {
       categoria: "CODIGO",
-      provedor: "openai",
+      provedor: model.provider,
       modeloIdentificador: model.identifier,
       modeloNome: model.name,
       modeloId: model.id,
       motivoEscolha:
-        "Desenvolvimento de software e engenharia de código detectados. Priorizado GPT Sol pela excelência analítica em algoritmos e sintaxe.",
+        "Desenvolvimento de software e engenharia de código detectados. Priorizado modelo de alta precisão lógica e computacional.",
       capacidadeNecessaria: "CODIGO",
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,
@@ -483,12 +522,12 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
     ]);
     decision = {
       categoria: "MATEMATICA",
-      provedor: "openai",
+      provedor: model.provider,
       modeloIdentificador: model.identifier,
       modeloNome: model.name,
       modeloId: model.id,
       motivoEscolha:
-        "Raciocínio lógico-matemático e computacional detectado. Priorizado GPT Sol pelo rigor analítico e precisão quantitativa.",
+        "Raciocínio lógico-matemático e computacional detectado. Priorizado modelo analítico com maior rigor conceitual.",
       capacidadeNecessaria: "TEXTO",
       userBadge: USER_FRIENDLY_BADGE,
       tempoClassificacaoMs: Date.now() - startTime,

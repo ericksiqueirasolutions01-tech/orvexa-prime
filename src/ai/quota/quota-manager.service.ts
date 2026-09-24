@@ -601,19 +601,24 @@ export class AiQuotaManagerService {
     if (id) {
       const updateData: any = {
         provider,
+        name: accountName,
         accountName,
+        baseUrl: customBaseUrl,
+        customBaseUrl,
+        quotaLimit: totalQuota,
         totalQuota,
         quotaType,
         expirationDate: expDate,
         renewalDate: renDate,
-        customBaseUrl,
         status,
         lastSync: new Date(),
       };
       if (encryptedData) {
+        updateData.encryptedApiKey = encryptedData.cipherText;
         updateData.encryptedKey = encryptedData.cipherText;
         updateData.iv = encryptedData.iv;
         updateData.authTag = encryptedData.authTag;
+        updateData.keyHint = encryptedData.keyHint;
         updateData.apiKeyMasked = apiKeyMasked;
       }
       await prisma.aiProviderAccount.update({
@@ -625,18 +630,25 @@ export class AiQuotaManagerService {
       const created = await prisma.aiProviderAccount.create({
         data: {
           provider,
+          name: accountName,
           accountName,
+          baseUrl: customBaseUrl,
+          customBaseUrl,
           apiKeyMasked: apiKeyMasked || "sk-...****",
+          keyHint: encryptedData?.keyHint || "sk-...****",
+          encryptedApiKey: encryptedData?.cipherText || null,
           encryptedKey: encryptedData?.cipherText || null,
           iv: encryptedData?.iv || null,
           authTag: encryptedData?.authTag || null,
+          quotaLimit: totalQuota,
           totalQuota,
+          tokensUsed: 0,
           usedQuota: 0,
+          tokensRemaining: initialRemaining,
           remainingQuota: initialRemaining,
           quotaType,
           expirationDate: expDate,
           renewalDate: renDate,
-          customBaseUrl,
           status,
           lastSync: new Date(),
         },

@@ -62,13 +62,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 1. Verifica se há chaves de API ativas no sistema
-    const activeApiKeys = await prisma.apiKey.findMany({
-      where: { status: "ACTIVE" },
-      include: { provider: true },
-    });
+    // 1. Verifica se há contas de API ativas no sistema (tabela mestra e legada)
+    const [activeAccounts, activeApiKeys] = await Promise.all([
+      prisma.aiProviderAccount.findMany({ where: { status: "ACTIVE" } }),
+      prisma.apiKey.findMany({ where: { status: "ACTIVE" }, include: { provider: true } }),
+    ]);
 
-    if (activeApiKeys.length === 0) {
+    if (activeAccounts.length === 0 && activeApiKeys.length === 0) {
       return NextResponse.json({
         success: true,
         activeApiConfigured: false,
@@ -78,9 +78,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const activeProviderSlugs = new Set(
-      activeApiKeys.map((k) => (k.provider?.slug || "").toLowerCase())
-    );
+    const activeProviderSlugs = new Set<string>();
+    activeAccounts.forEach((acc) => {
+      if (acc.provider) activeProviderSlugs.add(acc.provider.toLowerCase());
+    });
+    activeApiKeys.forEach((k) => {
+      if (k.provider?.slug) activeProviderSlugs.add(k.provider.slug.toLowerCase());
+    });
 
     // 2. Busca modelos ativos suportados pela API conectada
     const activeModels = await prisma.aiModel.findMany({
@@ -88,6 +92,14 @@ export async function GET(req: NextRequest) {
       select: { modelIdentifier: true },
     });
     const activeModelIds = new Set(activeModels.map((m) => m.modelIdentifier.toLowerCase()));
+
+    // Inclui modelos detectados das contas de provedor
+    activeAccounts.forEach((acc) => {
+      try {
+        const detected: string[] = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");
+        detected.forEach((d) => activeModelIds.add(d.toLowerCase()));
+      } catch {}
+    });
 
     const dbAgents = await prisma.agent.findMany({
       where: whereConditions.length > 0 ? { AND: whereConditions } : {},

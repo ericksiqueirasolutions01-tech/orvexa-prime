@@ -282,6 +282,26 @@ export async function markKeySuccess(
     },
   });
 
+  // Atualiza a tabela mestra definitiva ai_provider_accounts
+  await prisma.aiProviderAccount.updateMany({
+    where: {
+      status: { not: "DISABLED" },
+      OR: [
+        { encryptedApiKey: key.encryptedKey },
+        { encryptedKey: key.encryptedKey },
+        { name: key.name },
+      ],
+    },
+    data: {
+      tokensUsed: { increment: tokensEstimated },
+      usedQuota: { increment: tokensEstimated },
+      tokensRemaining: { decrement: tokensEstimated },
+      remainingQuota: { decrement: tokensEstimated },
+      estimatedCostUsd: { increment: costCents / 100 },
+      lastTestedAt: new Date(),
+    },
+  }).catch(() => {});
+
   if (newStatus !== key.status) {
     appCache.deletePattern(/^apikeys:/);
   }

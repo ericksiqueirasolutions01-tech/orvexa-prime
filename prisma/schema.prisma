@@ -617,27 +617,39 @@ model AiProviderKey {
 
 model AiProviderAccount {
   id               String    @id @default(uuid())
-  provider         String    // mirai, openai, anthropic, google, openrouter, azure
-  accountName      String
-  apiKeyMasked     String
-  encryptedKey     String?
+  provider         String    // openai, anthropic, google, mirai, openrouter
+  name             String    @default("") // Nome da conta/API (ex: "Clipoos Produção")
+  accountName      String    // Nome legado da conta
+  baseUrl          String?   // Base URL da API (ex: "https://proxy.clipoos.online/v1")
+  customBaseUrl    String?   // URL legada
+  encryptedApiKey  String?   // Chave criptografada AES-256-GCM
+  encryptedKey     String?   // Chave legada
   iv               String?
   authTag          String?
-  totalQuota       Int       @default(0) // total contratado em tokens
-  usedQuota        Int       @default(0) // tokens consumidos
-  remainingQuota   Int       @default(0) // tokens restantes
+  keyHint          String?   // Safe preview: "...x98a"
+  apiKeyMasked     String    // Chave mascarada para UI
+  modelsDetected   String    @default("[]") // Modelos detectados via GET /models
+  detectedModels   String?   // Modelos legados
+  capabilities     String    @default("[\"TEXTO\"]") // JSON array das capacidades: ["TEXTO", "CODIGO", "DOCUMENTO"]
+  quotaLimit       Int       @default(0) // Limite total contratado em tokens
+  totalQuota       Int       @default(0) // Quota legada
+  tokensUsed       Int       @default(0) // Tokens consumidos
+  usedQuota        Int       @default(0) // Quota usada legada
+  tokensRemaining  Int       @default(0) // Tokens restantes
+  remainingQuota   Int       @default(0) // Quota restante legada
   quotaType        String    @default("TOKENS") // TOKENS, CREDITS_USD, UNLIMITED
+  status           String    @default("ACTIVE") // ACTIVE, CONNECTED, DISABLED, WARNING_90, BLOCKED_QUOTA, RATE_LIMITED, ERROR
+  priority         Int       @default(1)
+  createdBy        String?   // ID do administrador que criou
+  lastTestedAt     DateTime?
+  lastLatencyMs    Int       @default(0)
   expirationDate   DateTime?
   renewalDate      DateTime?
   lastSync         DateTime  @default(now())
-  status           String    @default("CONNECTED") // CONNECTED, INVALID, EXPIRED, LIMIT_REACHED
-  customBaseUrl    String?
   todayTokens      Int       @default(0)
   monthTokens      Int       @default(0)
   estimatedCostUsd Float     @default(0)
   projectedCostUsd Float     @default(0)
-  detectedModels   String?   // JSON array de modelos suportados
-  lastLatencyMs    Int       @default(0)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 

@@ -272,7 +272,41 @@ export default function AdminApiKeysPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro ao registrar chave.");
+      if (!res.ok) {
+        if (data.canForceSave && window.confirm(`${data.error}\n\nDeseja salvar esta API no banco oficial definitivo mesmo assim?`)) {
+          const forceRes = await fetch("/api/admin/api-keys", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              providerId: provId || undefined,
+              providerSlug: provSlug || undefined,
+              name: keyName,
+              rawApiKey,
+              priority: Number(priority),
+              tokenLimitMonthly: Number(tokenLimit),
+              customBaseUrl: customBaseUrl.trim() || undefined,
+              capabilities: selectedCapabilities,
+              forceSave: true,
+            }),
+          });
+          const forceData = await forceRes.json();
+          if (forceRes.ok) {
+            setFeedback({
+              type: "success",
+              message: forceData.message || "Chave salva com sucesso no banco oficial!",
+            });
+            setName("");
+            setRawApiKey("");
+            setCustomBaseUrl("");
+            setPriority(1);
+            setTokenLimit(0);
+            setSelectedCapabilities(["TEXTO", "CODIGO", "DOCUMENTO"]);
+            fetchKeys();
+            return;
+          }
+        }
+        throw new Error(data.error || "Erro ao registrar chave.");
+      }
 
       setFeedback({
         type: "success",

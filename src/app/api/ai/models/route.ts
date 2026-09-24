@@ -15,34 +15,49 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
     }
 
-    // 1. Verifica se há chaves de API ativas
-    const activeApiKeys = await prisma.apiKey.findMany({
-      where: { status: "ACTIVE" },
-      select: { provider: true, keyHint: true, customBaseUrl: true },
-    });
+    // 1. Verifica se há contas de API ativas na tabela mestra oficial
+    const [activeAccounts, activeApiKeys] = await Promise.all([
+      prisma.aiProviderAccount.findMany({
+        where: { status: "ACTIVE" },
+      }),
+      prisma.apiKey.findMany({
+        where: { status: "ACTIVE" },
+      }),
+    ]);
 
-    if (activeApiKeys.length === 0) {
+    if (activeAccounts.length === 0 && activeApiKeys.length === 0) {
       return NextResponse.json({
         success: true,
         activeApiConfigured: false,
         message: "Nenhuma IA configurada pelo administrador.",
-        models: [],
+        models: [getModelDisplayInfo("orvexa-prime")],
       });
     }
 
-    // 2. Busca modelos ativos no banco
+    // 2. Extrai modelos detectados das contas ativas
+    const detectedModelIds = new Set<string>();
+    for (const acc of activeAccounts) {
+      try {
+        const list: string[] = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");
+        list.forEach((m) => detectedModelIds.add(m));
+      } catch {}
+    }
+
+    // 3. Busca modelos ativos no banco
     const dbModels = await prisma.aiModel.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
     });
 
-    // 3. Monta a lista formatada com nomes amigáveis
+    dbModels.forEach((m) => detectedModelIds.add(m.modelIdentifier));
+
+    // 4. Monta a lista formatada com nomes amigáveis sem expor detalhes técnicos
     const modelsList = [
       // Opção inteligente ORVEXA Auto
       getModelDisplayInfo("orvexa-prime"),
       // Modelos suportados pela API ativa
-      ...dbModels.map((m) => {
-        return getModelDisplayInfo(m.modelIdentifier);
+      ...Array.from(detectedModelIds).map((mId) => {
+        return getModelDisplayInfo(mId);
       }),
     ];
 

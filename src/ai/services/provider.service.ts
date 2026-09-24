@@ -164,6 +164,54 @@ export class AIProviderService {
   }
 
   /**
+   * Mapeia automaticamente modelos detectados via GET /models para capacidades reais da API
+   */
+  public static inferCapabilitiesFromModels(models: string[]): string[] {
+    const caps = new Set<string>(["TEXTO"]);
+    for (const m of models) {
+      const lower = m.toLowerCase();
+      if (
+        lower.includes("code") ||
+        lower.includes("codex") ||
+        lower.includes("sol") ||
+        lower.includes("developer") ||
+        lower.includes("prog") ||
+        lower.includes("qwen-coder") ||
+        lower.includes("deepseek-coder")
+      ) {
+        caps.add("CODIGO");
+      }
+      if (
+        lower.includes("terra") ||
+        lower.includes("doc") ||
+        lower.includes("rag") ||
+        lower.includes("pdf") ||
+        lower.includes("analysis")
+      ) {
+        caps.add("DOCUMENTO");
+      }
+      if (
+        lower.includes("dall-e") ||
+        lower.includes("image") ||
+        lower.includes("flux") ||
+        lower.includes("midjourney") ||
+        lower.includes("imagen")
+      ) {
+        caps.add("IMAGEM");
+      }
+      if (
+        lower.includes("video") ||
+        lower.includes("sora") ||
+        lower.includes("runway") ||
+        lower.includes("veo")
+      ) {
+        caps.add("VIDEO");
+      }
+    }
+    return Array.from(caps);
+  }
+
+  /**
    * Teste de Conexão Unificado com diagnóstico amigável para qualquer provedor
    */
   public static async testConnection(params: ProviderTestParams): Promise<ProviderTestResult> {
