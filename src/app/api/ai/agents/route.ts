@@ -86,14 +86,8 @@ export async function GET(req: NextRequest) {
       if (k.provider?.slug) activeProviderSlugs.add(k.provider.slug.toLowerCase());
     });
 
-    // 2. Busca modelos ativos suportados pela API conectada
-    const activeModels = await prisma.aiModel.findMany({
-      where: { isActive: true },
-      select: { modelIdentifier: true },
-    });
-    const activeModelIds = new Set(activeModels.map((m) => m.modelIdentifier.toLowerCase()));
-
-    // Inclui modelos detectados das contas de provedor
+    // 2. Modelos suportados EXCLUSIVAMENTE pela API ativa
+    const activeModelIds = new Set<string>();
     activeAccounts.forEach((acc) => {
       try {
         const detected: string[] = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");

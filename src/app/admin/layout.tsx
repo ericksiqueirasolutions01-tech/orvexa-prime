@@ -46,7 +46,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "Quotas & Limites", href: "/admin/ai-keys", icon: BarChart3 },
     { label: "Saúde & Monitoramento", href: "/admin/ai-monitor", icon: Zap },
     { label: "Usuários & Acessos", href: "/admin/users", icon: Users },
-    { label: "Agentes de IA", href: "/admin/agents", icon: Bot },
+    // Oculto temporariamente conforme FASE 6 (não apagar código, apenas ocultar da interface administrativa)
+    // { label: "Agentes de IA", href: "/admin/agents", icon: Bot },
     { label: "Configurações do Sistema", href: "/admin/settings", icon: Sliders },
     { label: "Diagnóstico & Capacidades", href: "/admin/system/diagnostics", icon: Activity },
   ];

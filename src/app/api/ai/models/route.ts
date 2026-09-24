@@ -15,47 +15,49 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
     }
 
-    // 1. Verifica se há contas de API ativas na tabela mestra oficial
-    const [activeAccounts, activeApiKeys] = await Promise.all([
-      prisma.aiProviderAccount.findMany({
-        where: { status: "ACTIVE" },
-      }),
-      prisma.apiKey.findMany({
-        where: { status: "ACTIVE" },
-      }),
-    ]);
+    // 1. Verifica se há contas de API ativas na tabela mestra oficial (ai_provider_accounts)
+    const activeAccounts = await prisma.aiProviderAccount.findMany({
+      where: { status: "ACTIVE" },
+    });
 
-    if (activeAccounts.length === 0 && activeApiKeys.length === 0) {
+    if (activeAccounts.length === 0) {
       return NextResponse.json({
         success: true,
         activeApiConfigured: false,
         message: "Nenhuma IA configurada pelo administrador.",
-        models: [getModelDisplayInfo("orvexa-prime")],
+        models: [],
+        defaultModelId: "",
       });
     }
 
-    // 2. Extrai modelos detectados das contas ativas
+    // 2. Extrai modelos detectados EXCLUSIVAMENTE das contas ativas em ai_provider_accounts
     const detectedModelIds = new Set<string>();
     for (const acc of activeAccounts) {
       try {
         const list: string[] = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");
-        list.forEach((m) => detectedModelIds.add(m));
+        list.forEach((m) => {
+          if (m && typeof m === "string" && m.trim()) {
+            detectedModelIds.add(m.trim());
+          }
+        });
       } catch {}
     }
 
-    // 3. Busca modelos ativos no banco
-    const dbModels = await prisma.aiModel.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-    });
+    if (detectedModelIds.size === 0) {
+      return NextResponse.json({
+        success: true,
+        activeApiConfigured: false,
+        message: "Nenhum modelo detectado na API ativa.",
+        models: [],
+        defaultModelId: "",
+      });
+    }
 
-    dbModels.forEach((m) => detectedModelIds.add(m.modelIdentifier));
-
-    // 4. Monta a lista formatada com nomes amigáveis sem expor detalhes técnicos
+    // 3. Monta a lista formatada com nomes amigáveis sem expor detalhes técnicos
     const modelsList = [
       // Opção inteligente ORVEXA Auto
       getModelDisplayInfo("orvexa-prime"),
-      // Modelos suportados pela API ativa
+      // Apenas os modelos detectados na API ativa
       ...Array.from(detectedModelIds).map((mId) => {
         return getModelDisplayInfo(mId);
       }),

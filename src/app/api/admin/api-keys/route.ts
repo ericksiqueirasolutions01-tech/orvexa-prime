@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { encryptApiKey } from "@/lib/crypto";
 import { AIProviderService } from "@/ai/services/provider.service";
+import { appCache } from "@/lib/cache";
 
 export const dynamic = "force-dynamic";
 
@@ -30,51 +31,8 @@ export async function GET() {
     }),
   ]);
 
-  // Se por ventura a tabela mestra estiver vazia mas houver registros em ApiKey, migra automaticamente
-  if (accounts.length === 0) {
-    const fallbackKeys = await prisma.apiKey.findMany({
-      include: { provider: true },
-    });
-    for (const fk of fallbackKeys) {
-      let parsedCaps = ["TEXTO"];
-      try {
-        parsedCaps = JSON.parse(fk.capabilities || "[\"TEXTO\"]");
-      } catch {}
-
-      await prisma.aiProviderAccount.create({
-        data: {
-          provider: fk.provider?.slug || "openai",
-          name: fk.name,
-          accountName: fk.name,
-          baseUrl: fk.customBaseUrl,
-          customBaseUrl: fk.customBaseUrl,
-          encryptedApiKey: fk.encryptedKey,
-          encryptedKey: fk.encryptedKey,
-          iv: fk.iv,
-          authTag: fk.authTag,
-          keyHint: fk.keyHint,
-          apiKeyMasked: fk.keyHint,
-          capabilities: JSON.stringify(parsedCaps),
-          quotaLimit: fk.tokenLimitMonthly || 10000000,
-          totalQuota: fk.tokenLimitMonthly || 10000000,
-          tokensUsed: fk.tokensUsedMonth || 0,
-          usedQuota: fk.tokensUsedMonth || 0,
-          tokensRemaining: Math.max(0, (fk.tokenLimitMonthly || 10000000) - (fk.tokensUsedMonth || 0)),
-          remainingQuota: Math.max(0, (fk.tokenLimitMonthly || 10000000) - (fk.tokensUsedMonth || 0)),
-          status: fk.status || "ACTIVE",
-          priority: fk.priority || 1,
-        },
-      }).catch(() => {});
-    }
-  }
-
-  // Reconsulta garantindo todos os dados da tabela mestra
-  const masterAccounts = await prisma.aiProviderAccount.findMany({
-    orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
-  });
-
   // Sanitiza para JAMAIS retornar o cipherText cru para o frontend
-  const safeKeys = masterAccounts.map((acc) => {
+  const safeKeys = accounts.map((acc) => {
     let parsedCapabilities: string[] = ["TEXTO"];
     try {
       parsedCapabilities = JSON.parse(acc.capabilities || "[\"TEXTO\"]");
@@ -144,12 +102,15 @@ export async function POST(req: Request) {
       provider,
       name,
       rawApiKey,
+      apiKey,
       priority = 1,
       tokenLimitMonthly,
       quotaLimit,
       customBaseUrl,
       baseUrl,
       capabilities,
+      detectedModels: bodyDetectedModels,
+      models: bodyModels,
     } = body;
 
     const targetUrl = (baseUrl || customBaseUrl || "").trim();
@@ -165,14 +126,14 @@ export async function POST(req: Request) {
       name = targetUrl.includes("clipoos") ? "Clipoos Produção" : "Nova API AI Gateway";
     }
 
-    if (!rawApiKey || !rawApiKey.trim()) {
+    const cleanRawKey = (rawApiKey || apiKey || "").trim();
+
+    if (!cleanRawKey) {
       return NextResponse.json(
         { error: "A chave secreta da API (API Key) é obrigatória." },
         { status: 400 }
       );
     }
-
-    const cleanRawKey = rawApiKey.trim();
 
     // 1. FASE 5: Teste Automático de Conexão e Descoberta de Modelos (GET /models)
     console.log(`[API Registration] Testando conexão com ${targetSlug} em ${targetUrl || "padrão"}...`);
@@ -182,7 +143,11 @@ export async function POST(req: Request) {
       customBaseUrl: targetUrl || null,
     });
 
-    const forceSave = Boolean(body.forceSave);
+    const forceSave = Boolean(
+      body.forceSave ||
+      (Array.isArray(bodyDetectedModels) && bodyDetectedModels.length > 0) ||
+      (Array.isArray(bodyModels) && bodyModels.length > 0)
+    );
 
     if (!testResult.success && !forceSave) {
       return NextResponse.json(
@@ -198,7 +163,9 @@ export async function POST(req: Request) {
 
     const detectedModels = testResult.detectedModels && testResult.detectedModels.length > 0
       ? testResult.detectedModels
-      : (Array.isArray(body.models) && body.models.length > 0 ? body.models : ["gpt-4o", "gpt-4o-mini"]);
+      : (Array.isArray(bodyDetectedModels) && bodyDetectedModels.length > 0
+          ? bodyDetectedModels
+          : (Array.isArray(bodyModels) && bodyModels.length > 0 ? bodyModels : ["gpt-4o", "gpt-4o-mini"]));
 
     console.log(`[API Registration] Modelos registrados para ${name}:`, detectedModels);
 
@@ -332,6 +299,9 @@ export async function POST(req: Request) {
       },
     });
 
+    // FASE 4: Limpeza total de cache in-memory após cadastro
+    appCache.clear();
+
     return NextResponse.json({
       success: true,
       message: `API "${savedAccount.name}" validada e gravada definitivamente com ${detectedModels.length} modelos detectados!`,
@@ -401,6 +371,8 @@ export async function PATCH(req: Request) {
       });
     });
 
+    appCache.clear();
+
     return NextResponse.json({ success: true, key: updated });
   } catch (error: any) {
     return NextResponse.json({ error: "Erro ao atualizar conta de API." }, { status: 500 });
@@ -420,10 +392,42 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "ID não fornecido." }, { status: 400 });
   }
 
-  // Remove da tabela mestra ai_provider_accounts
-  await prisma.aiProviderAccount.delete({ where: { id: keyId } }).catch(() => {});
-  // Remove também de ApiKey se houver chave associada
-  await prisma.apiKey.delete({ where: { id: keyId } }).catch(() => {});
+  // Localiza a conta antes de deletar para sincronizar todas as tabelas
+  const account = await prisma.aiProviderAccount.findUnique({ where: { id: keyId } });
+  if (account) {
+    await prisma.aiProviderAccount.delete({ where: { id: keyId } }).catch(() => {});
+    await prisma.apiKey.deleteMany({
+      where: {
+        OR: [
+          { id: keyId },
+          { encryptedKey: (account.encryptedApiKey || account.encryptedKey) ?? undefined },
+          { name: account.name },
+        ],
+      },
+    }).catch(() => {});
+
+    // Verifica se restou alguma conta ativa para este provedor
+    const remainingCount = await prisma.aiProviderAccount.count({
+      where: { provider: account.provider, status: "ACTIVE" },
+    });
+    if (remainingCount === 0) {
+      await prisma.aiProvider.updateMany({
+        where: { slug: account.provider },
+        data: { isActive: false },
+      }).catch(() => {});
+
+      if (account.provider === "openai") {
+        await prisma.systemSetting.deleteMany({
+          where: { key: "openai_base_url" },
+        }).catch(() => {});
+      }
+    }
+  } else {
+    await prisma.apiKey.delete({ where: { id: keyId } }).catch(() => {});
+  }
+
+  // FASE 4: Limpeza total de cache in-memory
+  appCache.clear();
 
   await prisma.auditLog.create({
     data: {

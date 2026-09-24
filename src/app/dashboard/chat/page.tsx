@@ -28,6 +28,7 @@ import {
   Cpu,
   Brain,
   Zap,
+  AlertCircle,
 } from "lucide-react";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { FRIENDLY_MODELS, getModelDisplayInfo, ModelDisplayInfo } from "@/lib/model-names";
@@ -103,10 +104,9 @@ function ChatContent() {
   const [availableProjects, setAvailableProjects] = useState<ProjectItem[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
 
-  // Lista dinâmica de modelos suportados
-  const [supportedModels, setSupportedModels] = useState<ModelDisplayInfo[]>(
-    Object.values(FRIENDLY_MODELS)
-  );
+  // Lista dinâmica de modelos suportados (derivada estritamente do banco de dados)
+  const [supportedModels, setSupportedModels] = useState<ModelDisplayInfo[]>([]);
+  const [activeApiConfigured, setActiveApiConfigured] = useState<boolean | null>(null);
 
   // Copiado
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
@@ -133,11 +133,23 @@ function ChatContent() {
     fetch("/api/ai/models")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.models && Array.isArray(data.models) && data.models.length > 0) {
-          setSupportedModels(data.models);
+        if (data) {
+          const isConfigured = Boolean(data.activeApiConfigured);
+          setActiveApiConfigured(isConfigured);
+          const modelsList: ModelDisplayInfo[] = Array.isArray(data.models) ? data.models : [];
+          setSupportedModels(modelsList);
+          if (modelsList.length > 0) {
+            setSelectedModel((prev) => {
+              if (modelsList.some((m) => m.id === prev)) return prev;
+              return data.defaultModelId || modelsList[0].id;
+            });
+          }
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setActiveApiConfigured(false);
+        setSupportedModels([]);
+      });
 
     fetch("/api/ai/agents")
       .then((res) => (res.ok ? res.json() : null))
@@ -460,7 +472,9 @@ function ChatContent() {
     URL.revokeObjectURL(url);
   };
 
-  const currentModelDisplay = getModelDisplayInfo(selectedModel);
+  const currentModelDisplay =
+    supportedModels.find((m) => m.id === selectedModel) ||
+    (supportedModels.length > 0 ? supportedModels[0] : null);
 
   return (
     <div className="flex flex-col h-screen w-full bg-white text-slate-900 overflow-hidden font-sans">
@@ -468,19 +482,30 @@ function ChatContent() {
       <header className="h-14 border-b border-slate-200/80 px-4 md:px-6 flex items-center justify-between bg-white/95 backdrop-blur-xs shrink-0 z-20">
         {/* Seletor de Modelo Inteligente */}
         <div className="relative">
-          <button
-            onClick={() => setModelDropdownOpen((prev) => !prev)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-100 transition-colors text-xs font-bold text-slate-800"
-          >
-            <span>{currentModelDisplay.name}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${currentModelDisplay.badgeColor}`}>
-              {currentModelDisplay.badge}
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-          </button>
+          {supportedModels.length === 0 ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-700">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Nenhuma IA Ativa</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setModelDropdownOpen((prev) => !prev)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl hover:bg-slate-100 transition-colors text-xs font-bold text-slate-800"
+            >
+              <span>{currentModelDisplay?.name || "ORVEXA Auto"}</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                  currentModelDisplay?.badgeColor || "bg-slate-100 text-slate-700 border-slate-200"
+                }`}
+              >
+                {currentModelDisplay?.badge || "Padrão"}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+          )}
 
           {/* Dropdown de Modelos Amigáveis */}
-          {modelDropdownOpen && (
+          {modelDropdownOpen && supportedModels.length > 0 && (
             <>
               <div
                 className="fixed inset-0 z-30"
@@ -607,6 +632,23 @@ function ChatContent() {
                 sua solicitação diretamente.
               </p>
             </div>
+
+            {/* Aviso quando não há nenhuma API ativa no sistema */}
+            {(activeApiConfigured === false || (activeApiConfigured !== null && supportedModels.length === 0)) && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 text-xs flex items-start gap-3 max-w-lg mx-auto text-left shadow-xs">
+                <div className="p-1.5 rounded-xl bg-amber-100 text-amber-700 shrink-0 mt-0.5">
+                  <AlertCircle className="w-4 h-4" />
+                </div>
+                <div className="space-y-1">
+                  <p className="font-bold text-amber-900 text-sm">
+                    Nenhuma API de Inteligência Artificial configurada
+                  </p>
+                  <p className="text-amber-700 text-xs leading-relaxed">
+                    O administrador precisa cadastrar e ativar uma chave de API oficial no painel administrativo para liberar o envio de mensagens e os modelos inteligentes.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Grid de 4 Atalhos de Alto Impacto */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left">
@@ -803,7 +845,8 @@ function ChatContent() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-full transition-colors shrink-0 mb-0.5"
+              disabled={supportedModels.length === 0}
+              className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 mb-0.5"
               title="Anexar arquivo (PDF, TXT, ZIP, Imagens)"
             >
               <Paperclip className="w-4 h-4" />
@@ -815,9 +858,14 @@ function ChatContent() {
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
-              placeholder="Pergunte qualquer coisa ao ORVEXA PRIME..."
+              disabled={supportedModels.length === 0}
+              placeholder={
+                supportedModels.length === 0
+                  ? "Nenhuma API de IA configurada. Contate o administrador..."
+                  : "Pergunte qualquer coisa ao ORVEXA PRIME..."
+              }
               rows={1}
-              className="flex-1 bg-transparent border-0 text-slate-900 placeholder-slate-400 text-sm focus:outline-none resize-none py-1.5 max-h-44 leading-relaxed"
+              className="flex-1 bg-transparent border-0 text-slate-900 placeholder-slate-400 text-sm focus:outline-none resize-none py-1.5 max-h-44 leading-relaxed disabled:opacity-50 disabled:cursor-not-allowed"
             />
 
             {/* Botão de Enviar ou Parar */}
@@ -834,7 +882,7 @@ function ChatContent() {
               <button
                 type="button"
                 onClick={() => handleSendMessage()}
-                disabled={!input.trim() && attachedFiles.length === 0}
+                disabled={supportedModels.length === 0 || (!input.trim() && attachedFiles.length === 0)}
                 className="p-2 rounded-full bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-30 disabled:bg-slate-300 transition-all shrink-0 mb-0.5 shadow-xs"
                 title="Enviar mensagem"
               >

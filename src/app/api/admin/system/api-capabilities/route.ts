@@ -42,49 +42,29 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 1. Identifica a API e Chaves Ativas na tabela mestra oficial
+    // 1. Identifica a API Ativa EXCLUSIVAMENTE na tabela mestra oficial (ai_provider_accounts)
     const activeAccount = await prisma.aiProviderAccount.findFirst({
       where: { status: { in: ["ACTIVE", "CONNECTED"] } },
       orderBy: { updatedAt: "desc" },
     });
 
-    const activeApiKeys = await prisma.apiKey.findMany({
-      where: { status: "ACTIVE" },
-      include: { provider: true },
-      orderBy: { updatedAt: "desc" },
-    });
+    const isConfigured = !!activeAccount;
+    const activeEndpoint = activeAccount
+      ? activeAccount.baseUrl || activeAccount.customBaseUrl || "https://api.openai.com/v1"
+      : "Nenhum endpoint configurado";
 
-    const primaryKey = activeApiKeys[0];
-    const activeProvider = primaryKey?.provider;
-
-    const activeProviderSlugs = new Set<string>();
-    if (activeAccount?.provider) activeProviderSlugs.add(activeAccount.provider.toLowerCase());
-    activeApiKeys.forEach((k) => {
-      if (k.provider?.slug) activeProviderSlugs.add(k.provider.slug.toLowerCase());
-    });
-
-    // Endpoint configurado
-    const activeEndpoint =
-      activeAccount?.baseUrl ||
-      activeAccount?.customBaseUrl ||
-      primaryKey?.customBaseUrl ||
-      activeProvider?.baseUrl ||
-      process.env.OPENAI_BASE_URL ||
-      "https://api.miraiapi.com/v1";
-
-    const isConfigured = !!activeAccount || activeApiKeys.length > 0;
-    const totalQuota = activeAccount?.quotaLimit || activeAccount?.totalQuota || primaryKey?.tokenLimitMonthly || 10000000;
-    const usedQuota = activeAccount?.tokensUsed || activeAccount?.usedQuota || primaryKey?.tokensUsedMonth || 0;
+    const totalQuota = activeAccount?.quotaLimit || activeAccount?.totalQuota || 10000000;
+    const usedQuota = activeAccount?.tokensUsed || activeAccount?.usedQuota || 0;
     const remainingQuota = activeAccount?.tokensRemaining ?? activeAccount?.remainingQuota ?? Math.max(0, totalQuota - usedQuota);
 
     const apiInfo = {
       isConfigured,
-      name: activeAccount?.name || activeAccount?.accountName || primaryKey?.name || "API Produção Ativa",
-      provider: activeAccount?.provider === "openai" ? "OpenAI Compatible" : (activeAccount?.provider || activeProvider?.name || "OpenAI Compatible"),
-      providerSlug: activeAccount?.provider || activeProvider?.slug || "openai",
+      name: activeAccount?.name || activeAccount?.accountName || "Nenhuma API Cadastrada",
+      provider: activeAccount?.provider === "openai" ? "OpenAI Compatible" : (activeAccount?.provider || "Nenhum"),
+      providerSlug: activeAccount?.provider || "none",
       endpoint: activeEndpoint,
       status: isConfigured ? ("ONLINE" as const) : ("OFFLINE" as const),
-      keyHint: activeAccount?.keyHint || activeAccount?.apiKeyMasked || primaryKey?.keyHint || "...key",
+      keyHint: activeAccount?.keyHint || activeAccount?.apiKeyMasked || "Nenhuma",
       totalQuota,
       usedQuota,
       remainingQuota,
@@ -93,95 +73,75 @@ export async function GET(req: NextRequest) {
 
     // Parse de modelos detectados da conta ativa
     let accountDetectedModels: string[] = [];
-    try {
-      accountDetectedModels = JSON.parse(activeAccount?.modelsDetected || activeAccount?.detectedModels || "[]");
-    } catch {}
+    if (activeAccount) {
+      try {
+        accountDetectedModels = JSON.parse(activeAccount.modelsDetected || activeAccount.detectedModels || "[]");
+      } catch {}
+    }
 
     // Parse de capacidades da conta ativa
     let accountCapabilities: string[] = [];
-    try {
-      accountCapabilities = JSON.parse(activeAccount?.capabilities || "[]");
-    } catch {}
+    if (activeAccount) {
+      try {
+        accountCapabilities = JSON.parse(activeAccount.capabilities || "[]");
+      } catch {}
+    }
 
-    // 2. Identifica os Modelos Ativos e Detectados
-    const activeModelsDb = await prisma.aiModel.findMany({
-      where: { isActive: true },
-      include: { provider: true },
-      orderBy: { name: "asc" },
-    });
+    const activeModelIds = new Set<string>(
+      accountDetectedModels.map((m) => m.toLowerCase().trim()).filter(Boolean)
+    );
 
-    const activeModelIds = new Set<string>([
-      ...activeModelsDb.map((m) => m.modelIdentifier.toLowerCase()),
-      ...accountDetectedModels.map((m) => m.toLowerCase()),
-    ]);
-
-    const detectedModels = activeModelsDb.map((m) => {
-      let friendlyName = m.name;
+    const detectedModels = accountDetectedModels.map((mId) => {
+      const idLower = mId.toLowerCase();
+      let friendlyName = mId;
       let badge = "OPERACIONAL";
-      let category = "Texto";
+      let category = "Inteligência Artificial";
 
-      const idLower = m.modelIdentifier.toLowerCase();
-      if (idLower === "gpt-6-sol") {
-        friendlyName = "ORVEXA Prime (GPT-6 Sol)";
-        badge = "Recomendado • Principal";
-        category = "Inteligência Geral";
-      } else if (idLower === "gpt-5.6-sol") {
-        friendlyName = "ORVEXA Codex (GPT-5.6 Sol)";
-        badge = "Especialista em Código";
-        category = "Código & Engenharia";
-      } else if (idLower === "gpt-5.6-terra") {
-        friendlyName = "ORVEXA Análise (GPT-5.6 Terra)";
-        badge = "Documentos & RAG";
-        category = "Análise Documental";
-      } else if (idLower === "gpt-5.6-luna") {
-        friendlyName = "ORVEXA Instant (GPT-5.6 Luna)";
-        badge = "Ultra Rápido & Econômico";
+      if (idLower.includes("gpt-4o")) {
+        friendlyName = "ORVEXA Prime (" + mId + ")";
+        badge = "Alta Performance";
+        category = "Multimodal & Raciocínio";
+      } else if (idLower.includes("mini") || idLower.includes("turbo") || idLower.includes("flash")) {
+        friendlyName = "ORVEXA Fast (" + mId + ")";
+        badge = "Ultra Rápido";
         category = "Respostas Rápidas";
+      } else if (idLower.includes("sol")) {
+        friendlyName = "ORVEXA Codex (" + mId + ")";
+        badge = "Especialista";
+        category = "Engenharia";
+      } else if (idLower.includes("terra")) {
+        friendlyName = "ORVEXA Análise (" + mId + ")";
+        badge = "Documentos";
+        category = "Análise Documental";
       }
 
       return {
-        id: m.id,
-        identifier: m.modelIdentifier,
+        id: mId,
+        identifier: mId,
         name: friendlyName,
         badge,
         category,
-        provider: m.provider?.name || "Mirai Gateway",
-        maxContextTokens: m.contextWindow || 128000,
+        provider: apiInfo.name,
+        maxContextTokens: 128000,
         status: "OPERATIONAL" as const,
       };
     });
 
     // 3. Avaliação de Capacidades por Tipo
-    const hasTextModel =
-      accountCapabilities.includes("TEXTO") ||
-      activeModelIds.has("gpt-6-sol") ||
-      activeModelIds.has("gpt-5.6-sol") ||
-      activeModelIds.has("gpt-5.6-terra") ||
-      activeModelIds.has("gpt-5.6-luna") ||
-      activeModelIds.size > 0;
-
-    const hasCodeModel =
+    const hasTextModel = isConfigured && (accountCapabilities.includes("TEXTO") || activeModelIds.size > 0);
+    const hasCodeModel = isConfigured && (
       accountCapabilities.includes("CODIGO") ||
-      activeModelIds.has("gpt-5.6-sol") ||
-      Array.from(activeModelIds).some((id) => id.includes("code") || id.includes("sol") || id.includes("codex") || id.includes("dev")) ||
-      activeModelsDb.some((m) => m.capabilities?.includes("code") || m.capabilities?.includes("CODIGO"));
-
-    const hasDocsModel =
+      Array.from(activeModelIds).some((id) => id.includes("code") || id.includes("sol") || id.includes("codex") || id.includes("dev") || id.includes("gpt-4"))
+    );
+    const hasDocsModel = isConfigured && (
       accountCapabilities.includes("DOCUMENTO") ||
-      activeModelIds.has("gpt-5.6-terra") ||
-      Array.from(activeModelIds).some((id) => id.includes("terra") || id.includes("doc") || id.includes("rag")) ||
-      activeModelsDb.some((m) => m.capabilities?.includes("documents") || m.capabilities?.includes("rag") || m.capabilities?.includes("DOCUMENTO"));
-
-    // Imagem: Mirai/Clipoos é gateway OpenAI-compatível de LLM texto, difusão requer chave especializada
-    const hasImageModel = accountCapabilities.includes("IMAGEM") || activeModelsDb.some(
-      (m) =>
-        m.modelIdentifier.toLowerCase().includes("dall-e") ||
-        m.modelIdentifier.toLowerCase().includes("flux") ||
-        m.modelIdentifier.toLowerCase().includes("midjourney")
-    ) && activeProviderSlugs.has("openai_image");
-
-    // Vídeo: Requer Runway / Sora / Veo
-    const hasVideoModel = accountCapabilities.includes("VIDEO");
+      Array.from(activeModelIds).some((id) => id.includes("terra") || id.includes("doc") || id.includes("rag") || id.includes("gpt-4"))
+    );
+    const hasImageModel = isConfigured && (
+      accountCapabilities.includes("IMAGEM") ||
+      Array.from(activeModelIds).some((id) => id.includes("dall-e") || id.includes("flux") || id.includes("image"))
+    );
+    const hasVideoModel = isConfigured && accountCapabilities.includes("VIDEO");
 
     const capabilities: CapabilityItem[] = [
       {
@@ -240,6 +200,8 @@ export async function GET(req: NextRequest) {
     const allowedAgents: AgentDiagnosticItem[] = [];
     const blockedAgents: AgentDiagnosticItem[] = [];
 
+    const activeProviderSlug = (activeAccount?.provider || "").toLowerCase();
+
     for (const ag of allAgentsDb) {
       const slugLower = (ag.slug || "").toLowerCase();
       const nameLower = (ag.name || "").toLowerCase();
@@ -259,13 +221,31 @@ export async function GET(req: NextRequest) {
         else avatar = "🤖";
       }
 
+      // Regra 0: Se não há API ativa configurada, nenhum agente pode operar
+      if (!isConfigured || activeModelIds.size === 0) {
+        blockedAgents.push({
+          id: ag.id,
+          slug: ag.slug,
+          name: ag.name,
+          role: ag.role,
+          model: modelLower,
+          avatar,
+          category: ag.category,
+          isSystem: ag.isSystem,
+          status: "BLOQUEADO",
+          capabilityNeeded: "API de Inteligência Artificial Ativa",
+          reason: "Nenhuma API de Inteligência Artificial ativa cadastrada no sistema.",
+        });
+        continue;
+      }
+
       // Critério 1: Incompatibilidade com Anthropic Claude
       if (
         (slugLower.includes("claude") ||
           slugLower.includes("fable") ||
           nameLower.includes("claude") ||
           modelLower.includes("claude")) &&
-        !activeProviderSlugs.has("anthropic")
+        activeProviderSlug !== "anthropic"
       ) {
         blockedAgents.push({
           id: ag.id,
@@ -291,7 +271,7 @@ export async function GET(req: NextRequest) {
           slugLower.includes("analyst") ||
           slugLower.includes("edu") ||
           modelLower.includes("gemini")) &&
-        !activeProviderSlugs.has("google")
+        activeProviderSlug !== "google"
       ) {
         blockedAgents.push({
           id: ag.id,
