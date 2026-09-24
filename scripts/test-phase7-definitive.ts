@@ -251,3 +251,4 @@ run()
     console.error("Erro fatal na bateria de homologação:", err);
   })
   .finally(() => prisma.$disconnect());
+
