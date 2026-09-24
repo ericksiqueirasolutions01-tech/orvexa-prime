@@ -62,6 +62,29 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // 1. Verifica se há chaves de API ativas no sistema
+    const activeApiKeys = await prisma.apiKey.findMany({
+      where: { status: "ACTIVE" },
+      select: { provider: true, keyHint: true },
+    });
+
+    if (activeApiKeys.length === 0) {
+      return NextResponse.json({
+        success: true,
+        activeApiConfigured: false,
+        message: "Nenhuma IA configurada pelo administrador.",
+        agents: [],
+        total: 0,
+      });
+    }
+
+    // 2. Busca modelos ativos suportados pela API conectada
+    const activeModels = await prisma.aiModel.findMany({
+      where: { isActive: true },
+      select: { modelIdentifier: true },
+    });
+    const activeModelIds = new Set(activeModels.map((m) => m.modelIdentifier.toLowerCase()));
+
     const dbAgents = await prisma.agent.findMany({
       where: whereConditions.length > 0 ? { AND: whereConditions } : {},
       include: {
@@ -79,61 +102,73 @@ export async function GET(req: NextRequest) {
       orderBy: [{ isSystem: "desc" }, { createdAt: "desc" }],
     });
 
-    const formattedAgents = dbAgents.map((ag) => {
-      let tools: any[] = [];
-      try {
-        tools = JSON.parse(ag.tools || "[]");
-      } catch {}
+    const formattedAgents = dbAgents
+      .map((ag) => {
+        let tools: any[] = [];
+        try {
+          tools = JSON.parse(ag.tools || "[]");
+        } catch {}
 
-      // Mapeamento de avatar inteligente
-      let avatar = ag.avatar;
-      if (!avatar) {
-        if (ag.slug === "analista-financeiro" || ag.iconName === "TrendingUp") avatar = "💰";
-        else if (ag.slug === "especialista-marketing" || ag.iconName === "Megaphone") avatar = "🚀";
-        else if (ag.slug === "programador" || ag.iconName === "Code2") avatar = "💻";
-        else if (ag.slug === "assistente-juridico" || ag.iconName === "Scale") avatar = "⚖️";
-        else if (ag.slug === "professor" || ag.iconName === "GraduationCap") avatar = "🎓";
-        else avatar = "🤖";
-      }
+        // Mapeamento de avatar inteligente
+        let avatar = ag.avatar;
+        if (!avatar) {
+          if (ag.slug === "analista-financeiro" || ag.iconName === "TrendingUp") avatar = "💰";
+          else if (ag.slug === "especialista-marketing" || ag.iconName === "Megaphone") avatar = "🚀";
+          else if (ag.slug === "programador" || ag.iconName === "Code2") avatar = "💻";
+          else if (ag.slug === "assistente-juridico" || ag.iconName === "Scale") avatar = "⚖️";
+          else if (ag.slug === "professor" || ag.iconName === "GraduationCap") avatar = "🎓";
+          else avatar = "🤖";
+        }
 
-      const preferredModel =
-        ag.modelPreference ||
-        ag.preferredModel?.modelIdentifier ||
-        ag.preferredModelId ||
-        "orvexa-prime";
+        const preferredModel =
+          ag.modelPreference ||
+          ag.preferredModel?.modelIdentifier ||
+          ag.preferredModelId ||
+          "orvexa-prime";
 
-      return {
-        id: ag.id,
-        slug: ag.slug,
-        name: ag.name,
-        role: ag.role,
-        badge: ag.badge || (ag.isSystem ? "OFICIAL" : "PERSONALIZADO"),
-        color: ag.color,
-        avatar,
-        description: ag.description,
-        instructions: ag.instructions || ag.systemPrompt,
-        systemPrompt: ag.systemPrompt,
-        preferredModel,
-        preferredModelId: preferredModel,
-        preferredModelName: ag.preferredModel?.name || (preferredModel === "orvexa-prime" ? "ORVEXA AUTO" : preferredModel),
-        iconName: ag.iconName,
-        category: ag.category,
-        projectId: ag.projectId,
-        project: ag.project,
-        tools,
-        isSystem: ag.isSystem,
-        isActive: ag.isActive,
-        isOwner: ag.userId === user.id || user.role === "ADMIN",
-        createdAt: ag.createdAt,
-        stats: {
-          userConversationsCount: ag._count.conversations,
-          userMemoriesCount: ag._count.agentMemories,
-        },
-      };
-    });
+        return {
+          id: ag.id,
+          slug: ag.slug,
+          name: ag.name,
+          role: ag.role,
+          badge: ag.badge || (ag.isSystem ? "OFICIAL" : "PERSONALIZADO"),
+          color: ag.color,
+          avatar,
+          description: ag.description,
+          instructions: ag.instructions || ag.systemPrompt,
+          systemPrompt: ag.systemPrompt,
+          preferredModel,
+          preferredModelId: preferredModel,
+          preferredModelName: ag.preferredModel?.name || (preferredModel === "orvexa-prime" ? "ORVEXA AUTO" : preferredModel),
+          iconName: ag.iconName,
+          category: ag.category,
+          projectId: ag.projectId,
+          project: ag.project,
+          tools,
+          isSystem: ag.isSystem,
+          isActive: ag.isActive,
+          isOwner: ag.userId === user.id || user.role === "ADMIN",
+          createdAt: ag.createdAt,
+          stats: {
+            userConversationsCount: ag._count.conversations,
+            userMemoriesCount: ag._count.agentMemories,
+          },
+        };
+      })
+      // Filtra agentes para a área do cliente: mostra somente os que possuem modelo ativo ou utilizam ORVEXA Auto
+      .filter((ag) => {
+        if (includeInactive) return true;
+        const modelLower = ag.preferredModel.toLowerCase();
+        return (
+          modelLower === "orvexa-prime" ||
+          modelLower === "" ||
+          activeModelIds.has(modelLower)
+        );
+      });
 
     return NextResponse.json({
       success: true,
+      activeApiConfigured: true,
       agents: formattedAgents,
       total: formattedAgents.length,
     });
