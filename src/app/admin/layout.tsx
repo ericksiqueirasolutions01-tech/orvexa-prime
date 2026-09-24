@@ -48,7 +48,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: "Usuários & Acessos", href: "/admin/users", icon: Users },
     { label: "Agentes de IA", href: "/admin/agents", icon: Bot },
     { label: "Configurações do Sistema", href: "/admin/settings", icon: Sliders },
-    { label: "Diagnóstico & Auditoria", href: "/admin/system/diagnostics", icon: Activity },
+    { label: "Diagnóstico & Capacidades", href: "/admin/system/diagnostics", icon: Activity },
   ];
 
   return (
