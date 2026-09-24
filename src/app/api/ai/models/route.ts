@@ -1,5 +1,6 @@
 // src/app/api/ai/models/route.ts
 // LISTAGEM DINÂMICA DE MODELOS ATIVOS E COMPATÍVEIS — ORVEXA PRIME
+// Fonte Única da Verdade: ai_provider_registry
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
@@ -15,26 +16,30 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
     }
 
-    // 1. Verifica se há contas de API ativas na tabela mestra oficial (ai_provider_accounts)
-    const activeAccounts = await prisma.aiProviderAccount.findMany({
-      where: { status: { in: ["ACTIVE", "CONNECTED"] } },
+    // 1. Verifica se há contas de API ativas na tabela mestra oficial (ai_provider_registry)
+    const activeRegistries = await prisma.aiProviderRegistry.findMany({
+      where: {
+        isActive: true,
+        status: "ACTIVE",
+      },
+      orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
     });
 
-    if (activeAccounts.length === 0) {
+    if (activeRegistries.length === 0) {
       return NextResponse.json({
         success: true,
         activeApiConfigured: false,
-        message: "Nenhuma IA configurada pelo administrador.",
+        message: "Nenhuma API de Inteligência Artificial configurada. Solicite ao administrador a configuração de uma chave.",
         models: [],
         defaultModelId: "",
       });
     }
 
-    // 2. Extrai modelos detectados EXCLUSIVAMENTE das contas ativas em ai_provider_accounts
+    // 2. Extrai modelos detectados EXCLUSIVAMENTE das contas ativas em ai_provider_registry
     const detectedModelIds = new Set<string>();
-    for (const acc of activeAccounts) {
+    for (const reg of activeRegistries) {
       try {
-        const list: string[] = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");
+        const list: string[] = JSON.parse(reg.modelsJson || "[]");
         list.forEach((m) => {
           if (m && typeof m === "string" && m.trim()) {
             detectedModelIds.add(m.trim());

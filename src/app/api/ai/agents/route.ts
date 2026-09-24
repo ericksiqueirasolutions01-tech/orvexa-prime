@@ -62,13 +62,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 1. Verifica se há contas de API ativas no sistema (tabela mestra e legada)
-    const [activeAccounts, activeApiKeys] = await Promise.all([
+    // 1. Verifica se há contas de API ativas no sistema (ai_provider_registry como fonte principal)
+    const [activeRegistries, activeAccounts] = await Promise.all([
+      prisma.aiProviderRegistry.findMany({ where: { isActive: true, status: "ACTIVE" } }),
       prisma.aiProviderAccount.findMany({ where: { status: { in: ["ACTIVE", "CONNECTED"] } } }),
-      prisma.apiKey.findMany({ where: { status: { in: ["ACTIVE", "CONNECTED"] } }, include: { provider: true } }),
     ]);
 
-    if (activeAccounts.length === 0 && activeApiKeys.length === 0) {
+    if (activeRegistries.length === 0 && activeAccounts.length === 0) {
       return NextResponse.json({
         success: true,
         activeApiConfigured: false,
@@ -79,15 +79,21 @@ export async function GET(req: NextRequest) {
     }
 
     const activeProviderSlugs = new Set<string>();
+    activeRegistries.forEach((reg) => {
+      if (reg.provider) activeProviderSlugs.add(reg.provider.toLowerCase());
+    });
     activeAccounts.forEach((acc) => {
       if (acc.provider) activeProviderSlugs.add(acc.provider.toLowerCase());
     });
-    activeApiKeys.forEach((k) => {
-      if (k.provider?.slug) activeProviderSlugs.add(k.provider.slug.toLowerCase());
-    });
 
-    // 2. Modelos suportados EXCLUSIVAMENTE pela API ativa
+    // 2. Modelos suportados EXCLUSIVAMENTE pelas APIs ativas
     const activeModelIds = new Set<string>();
+    activeRegistries.forEach((reg) => {
+      try {
+        const detected: string[] = JSON.parse(reg.modelsJson || "[]");
+        detected.forEach((d) => activeModelIds.add(d.toLowerCase()));
+      } catch {}
+    });
     activeAccounts.forEach((acc) => {
       try {
         const detected: string[] = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");

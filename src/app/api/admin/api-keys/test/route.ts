@@ -1,11 +1,13 @@
 // src/app/api/admin/api-keys/test/route.ts
 // TESTE DE CONEXÃO DE PROVEDORES DE IA — ORVEXA PRIME DIGITAL
+// Fonte Principal: ai_provider_registry
 
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { decryptApiKey } from "@/lib/crypto";
 import { AIProviderService } from "@/ai/services/provider.service";
+import { ApiRegistryService } from "@/ai/registry/api-registry.service";
 
 export async function POST(req: Request) {
   try {
@@ -19,36 +21,64 @@ export async function POST(req: Request) {
     let trimmedKey = rawApiKey?.trim() || "";
     let baseUrl = customBaseUrl?.trim() || "";
     let detectedProvider = providerSlug || "openai";
-    let targetKeyRecord: any = null;
+    let targetType: "registry" | "account" | "apiKey" | null = null;
+    let targetRecord: any = null;
 
     // Se fornecido keyId, recupera e decripta a chave do banco com segurança
     if (keyId) {
-      const accountRecord = await prisma.aiProviderAccount.findUnique({
+      // 1. Procura primeiro na tabela mestra oficial ai_provider_registry
+      const registryRecord = await prisma.aiProviderRegistry.findUnique({
         where: { id: keyId },
       });
 
-      if (accountRecord) {
-        targetKeyRecord = { isAccount: true, record: accountRecord };
-        const encKey = accountRecord.encryptedApiKey || accountRecord.encryptedKey;
-        if (encKey && accountRecord.iv && accountRecord.authTag) {
-          trimmedKey = decryptApiKey(encKey, accountRecord.iv, accountRecord.authTag);
+      if (registryRecord) {
+        targetType = "registry";
+        targetRecord = registryRecord;
+        try {
+          trimmedKey = ApiRegistryService.decryptKey(registryRecord);
+        } catch {
+          trimmedKey = registryRecord.encryptedApiKey;
         }
-        baseUrl = accountRecord.baseUrl || accountRecord.customBaseUrl || "";
-        detectedProvider = accountRecord.provider || "openai";
+        baseUrl = registryRecord.baseUrl || "";
+        detectedProvider = registryRecord.provider || "openai";
       } else {
-        const apiKeyRecord = await prisma.apiKey.findUnique({
+        // Fallback para ai_provider_accounts
+        const accountRecord = await prisma.aiProviderAccount.findUnique({
           where: { id: keyId },
-          include: { provider: true },
         });
-        if (apiKeyRecord) {
-          targetKeyRecord = { isAccount: false, record: apiKeyRecord };
-          trimmedKey = decryptApiKey(apiKeyRecord.encryptedKey, apiKeyRecord.iv, apiKeyRecord.authTag);
-          baseUrl = apiKeyRecord.customBaseUrl || apiKeyRecord.provider.baseUrl || "";
-          detectedProvider = apiKeyRecord.provider.slug;
+
+        if (accountRecord) {
+          targetType = "account";
+          targetRecord = accountRecord;
+          const encKey = accountRecord.encryptedApiKey || accountRecord.encryptedKey;
+          if (encKey && accountRecord.iv && accountRecord.authTag) {
+            trimmedKey = decryptApiKey(encKey, accountRecord.iv, accountRecord.authTag);
+          } else {
+            trimmedKey = encKey || "";
+          }
+          baseUrl = accountRecord.baseUrl || accountRecord.customBaseUrl || "";
+          detectedProvider = accountRecord.provider || "openai";
+        } else {
+          // Fallback para apiKey
+          const apiKeyRecord = await prisma.apiKey.findUnique({
+            where: { id: keyId },
+            include: { provider: true },
+          });
+          if (apiKeyRecord) {
+            targetType = "apiKey";
+            targetRecord = apiKeyRecord;
+            if (apiKeyRecord.iv && apiKeyRecord.authTag) {
+              trimmedKey = decryptApiKey(apiKeyRecord.encryptedKey, apiKeyRecord.iv, apiKeyRecord.authTag);
+            } else {
+              trimmedKey = apiKeyRecord.encryptedKey;
+            }
+            baseUrl = apiKeyRecord.customBaseUrl || apiKeyRecord.provider.baseUrl || "";
+            detectedProvider = apiKeyRecord.provider.slug;
+          }
         }
       }
 
-      if (!targetKeyRecord) {
+      if (!targetType) {
         return NextResponse.json({ error: "Chave ou conta de API não encontrada." }, { status: 404 });
       }
     }
@@ -65,52 +95,29 @@ export async function POST(req: Request) {
       modelIdentifier,
     });
 
-    // Se o teste foi realizado em uma chave já cadastrada no banco, atualiza status
-    if (targetKeyRecord) {
-      if (targetKeyRecord.isAccount) {
-        const acc = targetKeyRecord.record;
-        if (testResult.success) {
-          await prisma.aiProviderAccount.update({
-            where: { id: acc.id },
-            data: {
-              status: "ACTIVE",
-              lastTestedAt: new Date(),
-              lastLatencyMs: testResult.latencyMs || 0,
-              modelsDetected: testResult.detectedModels ? JSON.stringify(testResult.detectedModels) : undefined,
-            },
-          }).catch(() => {});
-        } else {
-          await prisma.aiProviderAccount.update({
-            where: { id: acc.id },
-            data: {
-              status: testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR",
-              lastTestedAt: new Date(),
-              lastLatencyMs: testResult.latencyMs || 0,
-            },
-          }).catch(() => {});
-        }
-      } else {
-        const apiKey = targetKeyRecord.record;
-        if (testResult.success) {
-          await prisma.apiKey.update({
-            where: { id: apiKey.id },
-            data: {
-              status: "ACTIVE",
-              errorCount: 0,
-              quarantinedUntil: null,
-              lastUsedAt: new Date(),
-            },
-          }).catch(() => {});
-        } else {
-          await prisma.apiKey.update({
-            where: { id: apiKey.id },
-            data: {
-              status: testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR",
-              errorCount: { increment: 1 },
-            },
-          }).catch(() => {});
-        }
-      }
+    // Atualiza status no banco oficial
+    if (targetType === "registry") {
+      await prisma.aiProviderRegistry.update({
+        where: { id: targetRecord.id },
+        data: {
+          status: testResult.success ? "ACTIVE" : (testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR"),
+          lastLatencyMs: testResult.latencyMs || 0,
+          lastTestedAt: new Date(),
+          modelsJson: testResult.detectedModels && testResult.detectedModels.length > 0
+            ? JSON.stringify(testResult.detectedModels)
+            : targetRecord.modelsJson,
+        },
+      }).catch(() => {});
+    } else if (targetType === "account") {
+      await prisma.aiProviderAccount.update({
+        where: { id: targetRecord.id },
+        data: {
+          status: testResult.success ? "ACTIVE" : (testResult.errorCode === 429 ? "RATE_LIMITED" : "ERROR"),
+          lastLatencyMs: testResult.latencyMs || 0,
+          lastTestedAt: new Date(),
+          modelsDetected: testResult.detectedModels ? JSON.stringify(testResult.detectedModels) : undefined,
+        },
+      }).catch(() => {});
     }
 
     if (!testResult.success) {
@@ -118,11 +125,10 @@ export async function POST(req: Request) {
         {
           success: false,
           error: testResult.message,
-          latencyMs: testResult.latencyMs,
-          detectedProvider: testResult.provider,
-          endpointUsed: testResult.endpointUsed,
           errorCode: testResult.errorCode,
           details: testResult.details,
+          latencyMs: testResult.latencyMs,
+          endpoint: testResult.endpointUsed,
         },
         { status: 400 }
       );
@@ -131,17 +137,15 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       message: testResult.message,
+      provider: testResult.provider,
+      endpoint: testResult.endpointUsed,
       latencyMs: testResult.latencyMs,
-      detectedProvider: testResult.provider,
-      endpointUsed: testResult.endpointUsed,
       detectedModels: testResult.detectedModels || [],
     });
-  } catch (err: any) {
+  } catch (error: any) {
+    console.error("[Test Connection API Error]:", error);
     return NextResponse.json(
-      {
-        success: false,
-        error: `Erro no teste de conexão: ${err.message}`,
-      },
+      { error: "Erro interno no teste de conexão: " + error.message },
       { status: 500 }
     );
   }

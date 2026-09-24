@@ -128,7 +128,75 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
     async () => {
       const now = new Date();
 
-      // FASE 3: A tabela oficial ai_provider_accounts é a ÚNICA fonte de verdade absoluta
+      // FASE 2 & 4: ai_provider_registry é a ÚNICA fonte de verdade oficial
+      const registries = await prisma.aiProviderRegistry.findMany({
+        where: {
+          provider: providerSlug,
+          isActive: true,
+          status: "ACTIVE",
+        },
+        orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
+      });
+
+      if (registries.length > 0) {
+        const eligibleKeys: Array<any> = [];
+
+        for (const reg of registries) {
+          if (requiredCapability && requiredCapability !== "TEXTO") {
+            try {
+              const caps: string[] = JSON.parse(reg.capabilitiesJson || "[]");
+              if (caps.length > 0 && !caps.includes(requiredCapability)) {
+                continue;
+              }
+            } catch {}
+          }
+
+          const totalLimit = reg.quotaLimit || 0;
+          const used = reg.quotaUsed || 0;
+          let effectivePriority = reg.priority || 1;
+          let effectiveStatus = reg.status;
+
+          if (totalLimit > 0) {
+            const percentUsed = (used / totalLimit) * 100;
+            if (used >= totalLimit) {
+              continue;
+            }
+            if (percentUsed >= 90) {
+              effectivePriority = (reg.priority || 1) + 50;
+              effectiveStatus = "WARNING_90";
+            }
+          }
+
+          eligibleKeys.push({
+            id: reg.id,
+            name: reg.name,
+            encryptedKey: reg.encryptedApiKey,
+            iv: reg.iv || "",
+            authTag: reg.authTag || "",
+            customBaseUrl: reg.baseUrl,
+            tokenLimitMonthly: totalLimit,
+            tokensUsedMonth: used,
+            capabilities: reg.capabilitiesJson,
+            status: effectiveStatus,
+            priority: effectivePriority,
+            effectivePriority,
+            effectiveStatus,
+          });
+        }
+
+        eligibleKeys.sort((a, b) => {
+          if (a.effectivePriority !== b.effectivePriority) {
+            return a.effectivePriority - b.effectivePriority;
+          }
+          return a.tokensUsedMonth - b.tokensUsedMonth;
+        });
+
+        if (eligibleKeys.length > 0) {
+          return eligibleKeys;
+        }
+      }
+
+      // Fallback para ai_provider_accounts se necessário
       const accounts = await prisma.aiProviderAccount.findMany({
         where: {
           provider: providerSlug,
@@ -141,7 +209,6 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
         const eligibleKeys: Array<any> = [];
 
         for (const acc of accounts) {
-          // 1. Validação estrita de Capacidades
           if (requiredCapability && requiredCapability !== "TEXTO") {
             try {
               const caps: string[] = JSON.parse(acc.capabilities || "[]");
@@ -151,7 +218,6 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
             } catch {}
           }
 
-          // 2. Controle Fino de Quota e Rotação Automática (Regras 90% e 100%)
           const totalLimit = acc.quotaLimit || acc.totalQuota || 0;
           const used = acc.tokensUsed || acc.usedQuota || 0;
           let effectivePriority = acc.priority || 1;
@@ -159,13 +225,9 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
 
           if (totalLimit > 0) {
             const percentUsed = (used / totalLimit) * 100;
-
-            // REGRA 100%: Quando atingir 100% -> Bloquear
             if (used >= totalLimit) {
               continue;
             }
-
-            // REGRA 90%: Rebaixa prioridade para contingência
             if (percentUsed >= 90) {
               effectivePriority = (acc.priority || 1) + 50;
               effectiveStatus = "WARNING_90";
@@ -280,7 +342,16 @@ export async function markKeySuccess(
   tokensEstimated: number,
   costCents: number = 0.15
 ) {
-  // 1. Atualiza a tabela mestra definitiva ai_provider_accounts
+  // 0. Atualiza a tabela mestra definitiva ai_provider_registry
+  await prisma.aiProviderRegistry.updateMany({
+    where: { id: apiKeyId },
+    data: {
+      quotaUsed: { increment: tokensEstimated },
+      lastTestedAt: new Date(),
+    },
+  }).catch(() => {});
+
+  // 1. Atualiza a tabela ai_provider_accounts
   await prisma.aiProviderAccount.updateMany({
     where: {
       OR: [
@@ -690,7 +761,11 @@ DIRETRIZES FUNDAMENTAIS:
     throw new Error(`Falha no provedor de IA (${detailMsg}). Verifique se a chave, saldo ou URL estão corretos em Gestão de APIs.`);
   }
 
-  const activeAccountsCount = await prisma.aiProviderAccount.count({
+  const activeRegistriesCount = await prisma.aiProviderRegistry.count({
+    where: { isActive: true, status: "ACTIVE" },
+  });
+
+  const activeAccountsCount = activeRegistriesCount || await prisma.aiProviderAccount.count({
     where: { status: { in: ["ACTIVE", "CONNECTED"] } },
   });
 

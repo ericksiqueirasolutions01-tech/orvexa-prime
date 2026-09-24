@@ -659,5 +659,30 @@ model AiProviderAccount {
   @@map("ai_provider_accounts")
 }
 
+model AiProviderRegistry {
+  id               String    @id @default(uuid())
+  provider         String    // openai, anthropic, google, etc.
+  name             String    // Nome descritivo da API (ex: "Clipoos Produção")
+  baseUrl          String?   @map("base_url") // Endpoint proxy ou oficial
+  encryptedApiKey  String    @map("encrypted_api_key") // AES-256-GCM cipherText
+  iv               String?
+  authTag          String?   @map("auth_tag")
+  keyHint          String?   @map("key_hint") // Ex: "...5678"
+  status           String    @default("ACTIVE") // ACTIVE, DISABLED, ERROR
+  modelsJson       String    @default("[]") @map("models_json") // JSON array de IDs de modelo detectados
+  capabilitiesJson String    @default("[\"TEXTO\"]") @map("capabilities_json") // JSON array de capacidades
+  quotaLimit       Int       @default(0) @map("quota_limit") // Limite contratado (0 = ilimitado)
+  quotaUsed        Int       @default(0) @map("quota_used") // Consumo acumulado em tokens
+  isActive         Boolean   @default(true) @map("is_active")
+  priority         Int       @default(1)
+  lastLatencyMs    Int       @default(0) @map("last_latency_ms")
+  lastTestedAt     DateTime? @map("last_tested_at")
+  createdBy        String?   @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
-
+  @@index([provider])
+  @@index([isActive])
+  @@index([status])
+  @@map("ai_provider_registry")
+}

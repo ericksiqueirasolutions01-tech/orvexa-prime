@@ -42,40 +42,45 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 1. Identifica a API Ativa EXCLUSIVAMENTE na tabela mestra oficial (ai_provider_accounts)
-    const activeAccount = await prisma.aiProviderAccount.findFirst({
+    // 1. Identifica a API Ativa no Registry Oficial (ai_provider_registry)
+    const activeRegistry = await prisma.aiProviderRegistry.findFirst({
+      where: { isActive: true, status: "ACTIVE" },
+      orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
+    });
+
+    const activeAccount = activeRegistry || await prisma.aiProviderAccount.findFirst({
       where: { status: { in: ["ACTIVE", "CONNECTED"] } },
       orderBy: { updatedAt: "desc" },
     });
 
     const isConfigured = !!activeAccount;
     const activeEndpoint = activeAccount
-      ? activeAccount.baseUrl || activeAccount.customBaseUrl || ""
+      ? (activeAccount.baseUrl || (activeAccount as any).customBaseUrl || "")
       : "Nenhum endpoint configurado";
 
-    const totalQuota = activeAccount ? (activeAccount.quotaLimit || activeAccount.totalQuota || 0) : 0;
-    const usedQuota = activeAccount ? (activeAccount.tokensUsed || activeAccount.usedQuota || 0) : 0;
-    const remainingQuota = activeAccount ? (activeAccount.tokensRemaining ?? activeAccount.remainingQuota ?? Math.max(0, totalQuota - usedQuota)) : 0;
+    const totalQuota = activeAccount ? (activeAccount.quotaLimit || (activeAccount as any).totalQuota || 0) : 0;
+    const usedQuota = activeAccount ? ((activeAccount as any).quotaUsed || (activeAccount as any).tokensUsed || (activeAccount as any).usedQuota || 0) : 0;
+    const remainingQuota = activeAccount ? Math.max(0, totalQuota - usedQuota) : 0;
 
     const apiInfo = {
       isConfigured,
-      name: activeAccount ? (activeAccount.name || activeAccount.accountName || "API Provedor") : "Nenhuma API Cadastrada",
+      name: activeAccount ? (activeAccount.name || (activeAccount as any).accountName || "API Provedor") : "Nenhuma API Cadastrada",
       provider: activeAccount ? (activeAccount.provider === "openai" ? "OpenAI Compatible" : activeAccount.provider.toUpperCase()) : "Nenhum",
       providerSlug: activeAccount?.provider || "none",
       endpoint: activeEndpoint,
       status: isConfigured ? ("ONLINE" as const) : ("OFFLINE" as const),
-      keyHint: activeAccount?.keyHint || activeAccount?.apiKeyMasked || "Nenhuma",
+      keyHint: activeAccount?.keyHint || (activeAccount as any).apiKeyMasked || "Nenhuma",
       totalQuota,
       usedQuota,
       remainingQuota,
-      lastSync: activeAccount?.lastSync?.toISOString() || activeAccount?.updatedAt?.toISOString() || null,
+      lastSync: activeAccount?.updatedAt?.toISOString() || null,
     };
 
     // Parse de modelos detectados da conta ativa
     let accountDetectedModels: string[] = [];
     if (activeAccount) {
       try {
-        accountDetectedModels = JSON.parse(activeAccount.modelsDetected || activeAccount.detectedModels || "[]");
+        accountDetectedModels = JSON.parse((activeAccount as any).modelsJson || (activeAccount as any).modelsDetected || (activeAccount as any).detectedModels || "[]");
       } catch {}
     }
 
@@ -83,7 +88,7 @@ export async function GET(req: NextRequest) {
     let accountCapabilities: string[] = [];
     if (activeAccount) {
       try {
-        accountCapabilities = JSON.parse(activeAccount.capabilities || "[]");
+        accountCapabilities = JSON.parse((activeAccount as any).capabilitiesJson || (activeAccount as any).capabilities || "[]");
       } catch {}
     }
 
