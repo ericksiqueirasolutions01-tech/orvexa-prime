@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
     // 1. Verifica se há chaves de API ativas no sistema
     const activeApiKeys = await prisma.apiKey.findMany({
       where: { status: "ACTIVE" },
-      select: { provider: true, keyHint: true },
+      include: { provider: true },
     });
 
     if (activeApiKeys.length === 0) {
@@ -77,6 +77,10 @@ export async function GET(req: NextRequest) {
         total: 0,
       });
     }
+
+    const activeProviderSlugs = new Set(
+      activeApiKeys.map((k) => (k.provider?.slug || "").toLowerCase())
+    );
 
     // 2. Busca modelos ativos suportados pela API conectada
     const activeModels = await prisma.aiModel.findMany({
@@ -155,10 +159,39 @@ export async function GET(req: NextRequest) {
           },
         };
       })
-      // Filtra agentes para a área do cliente: mostra somente os que possuem modelo ativo ou utilizam ORVEXA Auto
+      // Filtra agentes para a área do cliente: mostra somente os que possuem suporte 100% operacional na API ativa
       .filter((ag) => {
         if (includeInactive) return true;
-        const modelLower = ag.preferredModel.toLowerCase();
+
+        const slugLower = (ag.slug || "").toLowerCase();
+        const nameLower = (ag.name || "").toLowerCase();
+        const modelLower = (ag.preferredModel || "").toLowerCase();
+
+        // 1. Esconde agentes Anthropic Claude se a chave Anthropic não estiver ativa
+        if (
+          (slugLower.includes("fable") || slugLower.includes("claude") || nameLower.includes("claude")) &&
+          !activeProviderSlugs.has("anthropic")
+        ) {
+          return false;
+        }
+
+        // 2. Esconde agentes Google Gemini se a chave Google não estiver ativa
+        if (
+          (slugLower.includes("gemini") || nameLower.includes("gemini") || slugLower.includes("estudos") || slugLower.includes("analyst")) &&
+          !activeProviderSlugs.has("google")
+        ) {
+          return false;
+        }
+
+        // 3. Esconde agentes GPT-6 Astra se o modelo Astra não estiver ativo no catálogo
+        if (
+          (slugLower.includes("astra") || nameLower.includes("astra")) &&
+          !activeModelIds.has("gpt-6-astra")
+        ) {
+          return false;
+        }
+
+        // 4. Exige que o modelo configurado seja suportado pela API ativa ou seja ORVEXA Auto
         return (
           modelLower === "orvexa-prime" ||
           modelLower === "" ||
