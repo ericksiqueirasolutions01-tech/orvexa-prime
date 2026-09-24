@@ -127,6 +127,13 @@ export async function POST(req: Request) {
       if (match) targetSlug = match.slug.toLowerCase();
     }
 
+    if (name && name.includes("@")) {
+      return NextResponse.json(
+        { error: "O nome da API não pode ser um endereço de e-mail. Utilize um nome descritivo (ex: Clipoos Produção)." },
+        { status: 400 }
+      );
+    }
+
     if (!name || !name.trim()) {
       name = targetUrl.includes("clipoos") ? "Clipoos Produção" : "Nova API";
     }
@@ -160,7 +167,6 @@ export async function POST(req: Request) {
           error: `Falha ao validar API: ${testResult.message}. Verifique a URL e a API Key.`,
           details: testResult.details,
           errorCode: testResult.errorCode,
-          canForceSave: true,
         },
         { status: 400 }
       );

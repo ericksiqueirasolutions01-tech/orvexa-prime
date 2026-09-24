@@ -22,6 +22,8 @@ import {
   Check,
   Ban,
   Radio,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 const DEFAULT_PROVIDERS = [
@@ -49,6 +51,7 @@ export default function AdminApiKeysPage() {
   const [name, setName] = useState("");
   const [rawApiKey, setRawApiKey] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
+  const [showKey, setShowKey] = useState(false);
   const [priority, setPriority] = useState(1);
   const [tokenLimit, setTokenLimit] = useState(0);
   const [selectedCapabilities, setSelectedCapabilities] = useState<string[]>([
@@ -228,6 +231,24 @@ export default function AdminApiKeysPage() {
     setFeedback(null);
 
     try {
+      const cleanName = name.trim();
+      const cleanKey = rawApiKey.trim();
+
+      if (!cleanKey) {
+        setFeedback({ type: "error", message: "A Chave Secreta da API é obrigatória." });
+        setActionLoading(false);
+        return;
+      }
+
+      if (cleanName.includes("@")) {
+        setFeedback({
+          type: "error",
+          message: "O Identificador / Nome não pode ser um endereço de e-mail. Digite o nome da API (ex: Clipoos Produção).",
+        });
+        setActionLoading(false);
+        return;
+      }
+
       let provId = selectedProvider;
       let provSlug = "";
 
@@ -251,10 +272,7 @@ export default function AdminApiKeysPage() {
         }
       }
 
-      let keyName = name.trim();
-      if (!keyName || keyName.includes("@")) {
-        keyName = autoDetected?.suggestedName || "Nova Chave";
-      }
+      const keyName = cleanName || autoDetected?.suggestedName || "Nova Chave";
 
       const res = await fetch("/api/admin/api-keys", {
         method: "POST",
@@ -263,7 +281,7 @@ export default function AdminApiKeysPage() {
           providerId: provId || undefined,
           providerSlug: provSlug || undefined,
           name: keyName,
-          rawApiKey,
+          rawApiKey: cleanKey,
           priority: Number(priority),
           tokenLimitMonthly: Number(tokenLimit),
           customBaseUrl: customBaseUrl.trim() || undefined,
@@ -273,39 +291,11 @@ export default function AdminApiKeysPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        if (data.canForceSave && window.confirm(`${data.error}\n\nDeseja salvar esta API no banco oficial definitivo mesmo assim?`)) {
-          const forceRes = await fetch("/api/admin/api-keys", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              providerId: provId || undefined,
-              providerSlug: provSlug || undefined,
-              name: keyName,
-              rawApiKey,
-              priority: Number(priority),
-              tokenLimitMonthly: Number(tokenLimit),
-              customBaseUrl: customBaseUrl.trim() || undefined,
-              capabilities: selectedCapabilities,
-              forceSave: true,
-            }),
-          });
-          const forceData = await forceRes.json();
-          if (forceRes.ok) {
-            setFeedback({
-              type: "success",
-              message: forceData.message || "Chave salva com sucesso no banco oficial!",
-            });
-            setName("");
-            setRawApiKey("");
-            setCustomBaseUrl("");
-            setPriority(1);
-            setTokenLimit(0);
-            setSelectedCapabilities(["TEXTO", "CODIGO", "DOCUMENTO"]);
-            fetchKeys();
-            return;
-          }
-        }
-        throw new Error(data.error || "Erro ao registrar chave.");
+        setFeedback({
+          type: "error",
+          message: data.error || "Falha na validação ou gravação da chave de API.",
+        });
+        return;
       }
 
       setFeedback({
@@ -574,7 +564,20 @@ export default function AdminApiKeysPage() {
           Registrar Nova Chave de API no AI Gateway
         </h2>
 
-        <form onSubmit={handleCreateKey} autoComplete="off" className="space-y-4">
+        <form
+          onSubmit={handleCreateKey}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+              e.preventDefault();
+            }
+          }}
+          autoComplete="off"
+          className="space-y-4"
+        >
+          {/* Inputs invisíveis para desarmar o autofill agressivo do Chrome/Edge */}
+          <input type="text" name="chrome_prevent_user" className="hidden" tabIndex={-1} autoComplete="off" />
+          <input type="password" name="chrome_prevent_pass" className="hidden" tabIndex={-1} autoComplete="off" />
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
@@ -602,9 +605,13 @@ export default function AdminApiKeysPage() {
               <label className="block text-xs font-medium text-slate-300 mb-1.5">Identificador / Nome</label>
               <input
                 type="text"
+                name="api_provider_name_custom"
+                id="api_provider_name_custom"
                 required
-                autoComplete="new-password"
-                placeholder="Ex: Mirai Claude Fable ou Codex 01"
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                placeholder="Ex: Clipoos Produção ou OpenAI Principal"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
@@ -612,18 +619,31 @@ export default function AdminApiKeysPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">
-                Chave Secreta (AES-256 Encrypted)
+              <label className="block text-xs font-medium text-slate-300 mb-1.5 flex items-center justify-between">
+                <span>Chave Secreta (AES-256 Encrypted)</span>
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="text-[10px] text-slate-400 hover:text-cyan-400 transition-colors flex items-center gap-1 font-mono"
+                >
+                  {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  {showKey ? "Ocultar" : "Mostrar"}
+                </button>
               </label>
               <div className="relative">
                 <Lock className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
                 <input
-                  type="password"
+                  type={showKey ? "text" : "password"}
+                  name="api_secret_token_field"
+                  id="api_secret_token_field"
                   required
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
                   placeholder="sk-ant-... ou sk-proj-..."
                   value={rawApiKey}
                   onChange={(e) => handleKeyInput(e.target.value)}
-                  className="w-full pl-9 pr-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                  className="w-full pl-9 pr-9 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 font-mono"
                 />
               </div>
             </div>
