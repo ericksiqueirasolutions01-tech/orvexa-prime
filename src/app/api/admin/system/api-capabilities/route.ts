@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureActiveAccountInDatabase } from "@/lib/serverless-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export interface AgentDiagnosticItem {
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureActiveAccountInDatabase(req);
     const user = await getCurrentUser();
     if (!user || user.role !== "ADMIN") {
       return NextResponse.json(

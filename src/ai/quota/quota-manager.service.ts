@@ -758,7 +758,10 @@ export class AiQuotaManagerService {
       }
 
       const activeAccounts = accounts.filter(
-        (a) => a.status === "CONNECTED" && a.remainingQuota > 0 && (!a.expirationDate || new Date(a.expirationDate) > new Date())
+        (a) =>
+          (a.status === "ACTIVE" || a.status === "CONNECTED") &&
+          (a.remainingQuota > 0 || (a.quotaLimit || a.totalQuota || 0) === 0) &&
+          (!a.expirationDate || new Date(a.expirationDate) > new Date())
       );
 
       if (activeAccounts.length === 0) {
@@ -766,7 +769,7 @@ export class AiQuotaManagerService {
         let reason = "Provedor indisponível no AI Quota Manager.";
         if (primary.status === "INVALID") reason = "Chave da conta está inválida.";
         else if (primary.status === "EXPIRED" || (primary.expirationDate && new Date(primary.expirationDate) <= new Date())) reason = "Contrato da conta está expirado.";
-        else if (primary.remainingQuota <= 0) reason = "Limite total de tokens da conta foi atingido (100%).";
+        else if (primary.remainingQuota <= 0 && (primary.quotaLimit || primary.totalQuota || 0) > 0) reason = "Limite total de tokens da conta foi atingido (100%).";
 
         return {
           available: false,

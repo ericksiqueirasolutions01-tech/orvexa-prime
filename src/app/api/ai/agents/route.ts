@@ -5,11 +5,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { syncOfficialAgentsToDatabase } from "@/ai/agents/sync-agents";
+import { ensureActiveAccountInDatabase } from "@/lib/serverless-sync";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    // Sincroniza se o container efêmero acabou de cold-startar
+    await ensureActiveAccountInDatabase(req);
+
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
@@ -64,8 +68,8 @@ export async function GET(req: NextRequest) {
 
     // 1. Verifica se há contas de API ativas no sistema (tabela mestra e legada)
     const [activeAccounts, activeApiKeys] = await Promise.all([
-      prisma.aiProviderAccount.findMany({ where: { status: "ACTIVE" } }),
-      prisma.apiKey.findMany({ where: { status: "ACTIVE" }, include: { provider: true } }),
+      prisma.aiProviderAccount.findMany({ where: { status: { in: ["ACTIVE", "CONNECTED"] } } }),
+      prisma.apiKey.findMany({ where: { status: { in: ["ACTIVE", "CONNECTED"] } }, include: { provider: true } }),
     ]);
 
     if (activeAccounts.length === 0 && activeApiKeys.length === 0) {

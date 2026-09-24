@@ -8,10 +8,19 @@ import { prisma } from "@/lib/prisma";
 import { encryptApiKey } from "@/lib/crypto";
 import { AIProviderService } from "@/ai/services/provider.service";
 import { appCache } from "@/lib/cache";
+import {
+  ensureActiveAccountInDatabase,
+  serializeAccountToCookieValue,
+  saveLocalDiskSnapshot,
+  removeLocalDiskSnapshot,
+  SYNC_COOKIE_NAME,
+} from "@/lib/serverless-sync";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Rehidrata banco caso container serverless (Vercel) tenha acabado de iniciar
+  await ensureActiveAccountInDatabase(req);
   const session = await getCurrentUser();
   if (!session || session.role !== "ADMIN") {
     return NextResponse.json({ error: "Acesso não autorizado." }, { status: 403 });
@@ -302,7 +311,15 @@ export async function POST(req: Request) {
     // FASE 4: Limpeza total de cache in-memory após cadastro
     appCache.clear();
 
-    return NextResponse.json({
+    // Sincronização multi-container Serverless (Vercel)
+    const allActiveAccounts = await prisma.aiProviderAccount.findMany({
+      where: { status: { in: ["ACTIVE", "CONNECTED"] } },
+      orderBy: { priority: "asc" },
+    });
+    const cookieVal = serializeAccountToCookieValue(allActiveAccounts);
+    saveLocalDiskSnapshot(allActiveAccounts);
+
+    const response = NextResponse.json({
       success: true,
       message: `API "${savedAccount.name}" validada e gravada definitivamente com ${detectedModels.length} modelos detectados!`,
       account: {
@@ -317,6 +334,18 @@ export async function POST(req: Request) {
         status: savedAccount.status,
       },
     });
+
+    if (cookieVal) {
+      response.cookies.set(SYNC_COOKIE_NAME, cookieVal, {
+        path: "/",
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 31536000,
+      });
+    }
+
+    return response;
   } catch (error: any) {
     console.error("[Create API Key Error]", error);
     return NextResponse.json(
@@ -438,5 +467,32 @@ export async function DELETE(req: Request) {
     },
   });
 
-  return NextResponse.json({ success: true, message: "API removida com sucesso da base definitiva." });
+  // Atualiza cookie de sincronização serverless
+  const remainingAccounts = await prisma.aiProviderAccount.findMany({
+    where: { status: { in: ["ACTIVE", "CONNECTED"] } },
+    orderBy: { priority: "asc" },
+  });
+
+  const response = NextResponse.json({ success: true, message: "API removida com sucesso da base definitiva." });
+
+  if (remainingAccounts.length > 0) {
+    const cookieVal = serializeAccountToCookieValue(remainingAccounts);
+    response.cookies.set(SYNC_COOKIE_NAME, cookieVal, {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 31536000,
+    });
+    saveLocalDiskSnapshot(remainingAccounts);
+  } else {
+    response.cookies.set(SYNC_COOKIE_NAME, "", {
+      path: "/",
+      httpOnly: true,
+      maxAge: 0,
+    });
+    removeLocalDiskSnapshot();
+  }
+
+  return response;
 }

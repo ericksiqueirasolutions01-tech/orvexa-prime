@@ -127,6 +127,79 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
     cacheKey,
     async () => {
       const now = new Date();
+
+      // FASE 3: A tabela oficial ai_provider_accounts é a ÚNICA fonte de verdade absoluta
+      const accounts = await prisma.aiProviderAccount.findMany({
+        where: {
+          provider: providerSlug,
+          status: { in: ["ACTIVE", "CONNECTED"] },
+        },
+        orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
+      });
+
+      if (accounts.length > 0) {
+        const eligibleKeys: Array<any> = [];
+
+        for (const acc of accounts) {
+          // 1. Validação estrita de Capacidades
+          if (requiredCapability && requiredCapability !== "TEXTO") {
+            try {
+              const caps: string[] = JSON.parse(acc.capabilities || "[]");
+              if (caps.length > 0 && !caps.includes(requiredCapability)) {
+                continue;
+              }
+            } catch {}
+          }
+
+          // 2. Controle Fino de Quota e Rotação Automática (Regras 90% e 100%)
+          const totalLimit = acc.quotaLimit || acc.totalQuota || 0;
+          const used = acc.tokensUsed || acc.usedQuota || 0;
+          let effectivePriority = acc.priority || 1;
+          let effectiveStatus = acc.status;
+
+          if (totalLimit > 0) {
+            const percentUsed = (used / totalLimit) * 100;
+
+            // REGRA 100%: Quando atingir 100% -> Bloquear
+            if (used >= totalLimit) {
+              continue;
+            }
+
+            // REGRA 90%: Rebaixa prioridade para contingência
+            if (percentUsed >= 90) {
+              effectivePriority = (acc.priority || 1) + 50;
+              effectiveStatus = "WARNING_90";
+            }
+          }
+
+          eligibleKeys.push({
+            id: acc.id,
+            name: acc.name || acc.accountName || "API AI Gateway",
+            encryptedKey: acc.encryptedApiKey || acc.encryptedKey,
+            iv: acc.iv || "",
+            authTag: acc.authTag || "",
+            customBaseUrl: acc.baseUrl || acc.customBaseUrl,
+            tokenLimitMonthly: totalLimit,
+            tokensUsedMonth: used,
+            capabilities: acc.capabilities,
+            status: effectiveStatus,
+            priority: effectivePriority,
+            effectivePriority,
+            effectiveStatus,
+          });
+        }
+
+        eligibleKeys.sort((a, b) => {
+          if (a.effectivePriority !== b.effectivePriority) {
+            return a.effectivePriority - b.effectivePriority;
+          }
+          return a.tokensUsedMonth - b.tokensUsedMonth;
+        });
+
+        return eligibleKeys;
+      }
+
+      // Fallback para tabela legada se ainda existir registro não migrado
       const provider = await prisma.aiProvider.findUnique({
         where: { slug: providerSlug },
         include: {
@@ -145,77 +218,26 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
       const eligibleKeys: Array<any> = [];
 
       for (const key of provider.apiKeys) {
-        // 1. Quarentena temporária por Rate Limit (429)
         if (key.quarantinedUntil && key.quarantinedUntil > now) {
           continue;
         }
 
-        // 2. Validação estrita de Capacidades
-        // "Nunca enviar uma solicitação para um modelo sem capacidade compatível"
         if (requiredCapability && requiredCapability !== "TEXTO") {
           try {
             const caps: string[] = JSON.parse(key.capabilities || "[]");
             if (caps.length > 0 && !caps.includes(requiredCapability)) {
-              continue; // Pula chave incompatível com a capacidade solicitada
+              continue;
             }
-          } catch {
-            // Ignora erro de JSON
-          }
-        }
-
-        // 3. Controle Fino de Quota e Rotação Automática (Regras 90% e 100%)
-        let effectivePriority = key.priority;
-        let effectiveStatus = key.status;
-
-        if (key.tokenLimitMonthly > 0) {
-          const percentUsed = (key.tokensUsedMonth / key.tokenLimitMonthly) * 100;
-
-          // REGRA 100%: Quando atingir 100% -> Bloquear novas chamadas
-          if (key.tokensUsedMonth >= key.tokenLimitMonthly) {
-            if (key.status !== "BLOCKED_QUOTA") {
-              await prisma.apiKey.update({
-                where: { id: key.id },
-                data: { status: "BLOCKED_QUOTA" },
-              }).catch(() => {});
-            }
-            continue; // Chave bloqueada não recebe nenhuma chamada
-          }
-
-          // REGRA 90%: Quando atingir 90% -> Retirar da prioridade e usar próxima API compatível
-          if (percentUsed >= 90) {
-            effectivePriority = key.priority + 50; // Rebaixa prioridade para fim da fila
-            effectiveStatus = "WARNING_90";
-            if (key.status !== "WARNING_90") {
-              await prisma.apiKey.update({
-                where: { id: key.id },
-                data: { status: "WARNING_90" },
-              }).catch(() => {});
-            }
-          } else if (key.status === "WARNING_90" || key.status === "BLOCKED_QUOTA") {
-            effectiveStatus = "ACTIVE";
-            await prisma.apiKey.update({
-              where: { id: key.id },
-              data: { status: "ACTIVE" },
-            }).catch(() => {});
-          }
+          } catch {}
         }
 
         eligibleKeys.push({
           ...key,
-          effectivePriority,
-          effectiveStatus,
+          effectivePriority: key.priority,
+          effectiveStatus: key.status,
           customBaseUrl: (key as any).customBaseUrl || provider.baseUrl,
         });
       }
-
-      // Ordena prioritariamente por effectivePriority (menor número = maior prioridade)
-      // e desempata por tokensUsedMonth (load balancing de menor consumo)
-      eligibleKeys.sort((a, b) => {
-        if (a.effectivePriority !== b.effectivePriority) {
-          return a.effectivePriority - b.effectivePriority;
-        }
-        return a.tokensUsedMonth - b.tokensUsedMonth;
-      });
 
       return eligibleKeys;
     },
@@ -227,22 +249,26 @@ export async function getHealthyApiKeys(providerSlug: string, requiredCapability
  * Registra falha de chave e coloca em quarentena se necessário.
  */
 export async function markKeyError(apiKeyId: string, isRateLimit: boolean) {
-  const key = await prisma.apiKey.findUnique({ where: { id: apiKeyId } });
-  const currentErrors = (key?.errorCount || 0) + 1;
-  const shouldSetError = currentErrors >= 3;
-  // Rate limit transitório: quarentena curta de 3 a 10 segundos
-  const quarantineSeconds = isRateLimit ? 5 : 300;
-  const quarantinedUntil = new Date(Date.now() + quarantineSeconds * 1000);
-  const statusToSet = shouldSetError ? (isRateLimit ? "RATE_LIMITED" : "ERROR") : (key?.status || "ACTIVE");
+  try {
+    const key = await prisma.apiKey.findUnique({ where: { id: apiKeyId } });
+    if (key) {
+      const currentErrors = (key?.errorCount || 0) + 1;
+      const shouldSetError = currentErrors >= 3;
+      // Rate limit transitório: quarentena curta de 3 a 10 segundos
+      const quarantineSeconds = isRateLimit ? 5 : 300;
+      const quarantinedUntil = new Date(Date.now() + quarantineSeconds * 1000);
+      const statusToSet = shouldSetError ? (isRateLimit ? "RATE_LIMITED" : "ERROR") : (key?.status || "ACTIVE");
 
-  await prisma.apiKey.update({
-    where: { id: apiKeyId },
-    data: {
-      status: statusToSet,
-      errorCount: { increment: 1 },
-      quarantinedUntil: shouldSetError || isRateLimit ? quarantinedUntil : null,
-    },
-  });
+      await prisma.apiKey.update({
+        where: { id: apiKeyId },
+        data: {
+          status: statusToSet,
+          errorCount: { increment: 1 },
+          quarantinedUntil: shouldSetError || isRateLimit ? quarantinedUntil : null,
+        },
+      }).catch(() => {});
+    }
+  } catch {}
   appCache.deletePattern(/^apikeys:/);
 }
 
@@ -254,42 +280,11 @@ export async function markKeySuccess(
   tokensEstimated: number,
   costCents: number = 0.15
 ) {
-  const key = await prisma.apiKey.findUnique({ where: { id: apiKeyId } });
-  if (!key) return;
-
-  const newUsed = key.tokensUsedMonth + tokensEstimated;
-  let newStatus = key.status;
-
-  if (key.tokenLimitMonthly > 0) {
-    if (newUsed >= key.tokenLimitMonthly) {
-      newStatus = "BLOCKED_QUOTA";
-    } else if (newUsed >= key.tokenLimitMonthly * 0.9) {
-      newStatus = "WARNING_90";
-    } else if (key.status === "WARNING_90" || key.status === "BLOCKED_QUOTA") {
-      newStatus = "ACTIVE";
-    }
-  }
-
-  await prisma.apiKey.update({
-    where: { id: apiKeyId },
-    data: {
-      tokensUsedMonth: { increment: tokensEstimated },
-      costAccumulatedCents: { increment: costCents },
-      status: newStatus,
-      errorCount: 0,
-      quarantinedUntil: null,
-      lastUsedAt: new Date(),
-    },
-  });
-
-  // Atualiza a tabela mestra definitiva ai_provider_accounts
+  // 1. Atualiza a tabela mestra definitiva ai_provider_accounts
   await prisma.aiProviderAccount.updateMany({
     where: {
-      status: { not: "DISABLED" },
       OR: [
-        { encryptedApiKey: key.encryptedKey },
-        { encryptedKey: key.encryptedKey },
-        { name: key.name },
+        { id: apiKeyId },
       ],
     },
     data: {
@@ -302,8 +297,40 @@ export async function markKeySuccess(
     },
   }).catch(() => {});
 
-  if (newStatus !== key.status) {
-    appCache.deletePattern(/^apikeys:/);
+  // 2. Atualiza tabela legada apiKey se existir registro correspondente
+  const key = await prisma.apiKey.findFirst({
+    where: { OR: [{ id: apiKeyId }] },
+  });
+
+  if (key) {
+    const newUsed = key.tokensUsedMonth + tokensEstimated;
+    let newStatus = key.status;
+
+    if (key.tokenLimitMonthly > 0) {
+      if (newUsed >= key.tokenLimitMonthly) {
+        newStatus = "BLOCKED_QUOTA";
+      } else if (newUsed >= key.tokenLimitMonthly * 0.9) {
+        newStatus = "WARNING_90";
+      } else if (key.status === "WARNING_90" || key.status === "BLOCKED_QUOTA") {
+        newStatus = "ACTIVE";
+      }
+    }
+
+    await prisma.apiKey.update({
+      where: { id: key.id },
+      data: {
+        tokensUsedMonth: { increment: tokensEstimated },
+        costAccumulatedCents: { increment: costCents },
+        status: newStatus,
+        errorCount: 0,
+        quarantinedUntil: null,
+        lastUsedAt: new Date(),
+      },
+    }).catch(() => {});
+
+    if (newStatus !== key.status) {
+      appCache.deletePattern(/^apikeys:/);
+    }
   }
 }
 
@@ -490,6 +517,7 @@ DIRETRIZES FUNDAMENTAIS:
   );
 
   const startTime = Date.now();
+  let lastExternalError: any = null;
 
   // Caso 1: Existem chaves cadastradas no admin para esse provedor (ou obtidas via failover)
   if (keys.length > 0) {
@@ -563,6 +591,7 @@ DIRETRIZES FUNDAMENTAIS:
           isFailover,
         };
       } catch (err: any) {
+        lastExternalError = err;
         console.warn(`[AI Gateway] Falha na chave ${activeKey.name}:`, err.message);
         const isRateLimit = err.status === 429 || err.message?.includes("429") || err.message?.includes("rate_limit");
         const isTransient503 = err.status === 503 || err.message?.includes("503") || err.message?.includes("high demand") || err.message?.includes("UNAVAILABLE");
@@ -576,8 +605,7 @@ DIRETRIZES FUNDAMENTAIS:
     }
   }
 
-  // Se todas as chaves do provedor falharem (ex: token Google sem quota ou erro de autenticação),
-  // executa failover dinâmico instantâneo para os outros provedores ativos
+  // Se todas as chaves do provedor falharem, executa failover dinâmico para os outros provedores ativos
   const fallbackProviders = ["openai", "anthropic", "google"].filter((p) => p !== decision.providerSlug);
   for (const altSlug of fallbackProviders) {
     const altKeys = await getHealthyApiKeys(altSlug);
@@ -646,64 +674,33 @@ DIRETRIZES FUNDAMENTAIS:
           apiKeyName: `${altKey.name} [Failover Automático]`,
           isFailover: true,
         };
-      } catch {
-        // Tenta próxima chave
+      } catch (altErr: any) {
+        lastExternalError = altErr;
       }
     }
   }
 
-  // Caso 2: Se ainda não houver chaves externas cadastradas pelo admin no banco,
-  // ou todas falharem, o Gateway ativa o modo de demonstração inteligente de alta fidelidade
-  const simulatedStream = createHighFidelitySimulatedStream({
-    decision,
-    messages,
-    systemPrompt: effectiveSystemPrompt,
-    lastUserMessage,
-  });
-
-  const latency = Date.now() - startTime;
-  if (decision.smartDecision) {
-    logRouterDecision({
-      userId,
-      pergunta: lastUserMessage,
-      decision: decision.smartDecision,
-      tempoRespostaMs: latency,
-    }).catch(() => {});
+  // FASE 5: REMOVER CONTINGÊNCIA FALSA
+  // "O modo demonstração não deve aparecer quando existe API válida.
+  // Regra: Se existe uma API ativa: NUNCA usar resposta demo.
+  // Se falhar: mostrar erro real (chave inválida, saldo, endpoint, modelo)."
+  if (lastExternalError) {
+    console.error("[AI Gateway] Erro definitivo na chamada ao provedor externo:", lastExternalError);
+    const detailMsg = lastExternalError.message || "Falha na comunicação com o provedor externo.";
+    throw new Error(`Falha no provedor de IA (${detailMsg}). Verifique se a chave, saldo ou URL estão corretos em Gestão de APIs.`);
   }
-  await prisma.usageLog.create({
-    data: {
-      userId,
-      modelId: decision.modelId || null,
-      apiKeyId: null,
-      tokensInput: estimatedInputTokens,
-      tokensOutput: 300,
-      totalTokens: estimatedInputTokens + 300,
-      costCents: 0.05,
-      priceChargedCents: 0.2,
-      latencyMs: latency,
-      status: "SUCCESS",
-    },
+
+  const activeAccountsCount = await prisma.aiProviderAccount.count({
+    where: { status: { in: ["ACTIVE", "CONNECTED"] } },
   });
 
-  // Registra histórico na tabela ai_usage_logs (AI MONITOR)
-  AIMonitorService.recordUsageLog({
-    userId,
-    provider: decision.providerSlug,
-    model: decision.modelIdentifier,
-    tokensInput: estimatedInputTokens,
-    tokensOutput: 300,
-    latencyMs: latency,
-    cost: 0.0005,
-    statusCode: 200,
-    status: "SUCCESS",
-  }).catch(() => {});
+  if (activeAccountsCount > 0) {
+    throw new Error(
+      `Nenhuma chave de API compatível ou disponível para o modelo "${decision.modelIdentifier}" (${decision.providerSlug}). Verifique as permissões e cotas no painel administrativo.`
+    );
+  }
 
-  return {
-    stream: simulatedStream,
-    decision,
-    apiKeyName: "ORVEXA Gateway Standby / Fallback",
-    isFailover: false,
-  };
+  throw new Error("Nenhuma API de IA configurada pelo administrador. Cadastre uma API no painel para iniciar o chat.");
 }
 
 /**

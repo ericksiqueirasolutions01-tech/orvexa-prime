@@ -351,7 +351,94 @@ async function resolveModelRecord(
     const cached = await appCache.getOrSet(
       `model:info:${identifierCandidate}:${fallbackCandidates.join(",")}`,
       async () => {
-        // 1. Tenta encontrar diretamente entre os modelos ativos compatíveis
+        // 1. REGRA FASE 6: A tabela oficial ai_provider_accounts é a fonte de verdade absoluta.
+        // O Smart Router NUNCA escolhe um modelo que não esteja presente nas APIs ativas cadastradas.
+        const activeAccounts = await prisma.aiProviderAccount.findMany({
+          where: { status: { in: ["ACTIVE", "CONNECTED"] } },
+          orderBy: { priority: "asc" },
+        });
+
+        if (activeAccounts.length > 0) {
+          const detectedList: Array<{ modelId: string; providerSlug: string; accountId: string }> = [];
+          for (const acc of activeAccounts) {
+            let list: string[] = [];
+            try {
+              list = JSON.parse(acc.modelsDetected || acc.detectedModels || "[]");
+            } catch {}
+            for (const m of list) {
+              if (m && typeof m === "string" && m.trim()) {
+                detectedList.push({
+                  modelId: m.trim(),
+                  providerSlug: acc.provider,
+                  accountId: acc.id,
+                });
+              }
+            }
+          }
+
+          if (detectedList.length > 0) {
+            // A. Tenta casar candidatos exatos com o provedor solicitado
+            for (const cand of allCandidates) {
+              const matched = detectedList.find(
+                (d) => d.providerSlug.toLowerCase() === providerSlug.toLowerCase() && d.modelId.toLowerCase() === cand.toLowerCase()
+              );
+              if (matched) {
+                return {
+                  id: matched.accountId,
+                  name: matched.modelId,
+                  modelIdentifier: matched.modelId,
+                  provider: { slug: matched.providerSlug },
+                };
+              }
+            }
+
+            // B. Tenta casar candidatos exatos com qualquer provedor ativo cadastrado
+            for (const cand of allCandidates) {
+              const matched = detectedList.find(
+                (d) => d.modelId.toLowerCase() === cand.toLowerCase()
+              );
+              if (matched) {
+                return {
+                  id: matched.accountId,
+                  name: matched.modelId,
+                  modelIdentifier: matched.modelId,
+                  provider: { slug: matched.providerSlug },
+                };
+              }
+            }
+
+            // C. Tenta casar por substring nos candidatos (ex: mini, sol, doc, 4o)
+            for (const cand of allCandidates) {
+              const candLower = cand.toLowerCase();
+              const matched = detectedList.find((d) => {
+                const mLower = d.modelId.toLowerCase();
+                return mLower.includes(candLower) || candLower.includes(mLower);
+              });
+              if (matched) {
+                return {
+                  id: matched.accountId,
+                  name: matched.modelId,
+                  modelIdentifier: matched.modelId,
+                  provider: { slug: matched.providerSlug },
+                };
+              }
+            }
+
+            // D. Fallback para o primeiro modelo detectado do provedor ou da conta de maior prioridade
+            // Garantia: Jamais envia modelo que a API externa não possui
+            const fallbackItem =
+              detectedList.find((d) => d.providerSlug.toLowerCase() === providerSlug.toLowerCase()) ||
+              detectedList[0];
+            return {
+              id: fallbackItem.accountId,
+              name: fallbackItem.modelId,
+              modelIdentifier: fallbackItem.modelId,
+              provider: { slug: fallbackItem.providerSlug },
+            };
+          }
+        }
+
+        // 2. Se não houver contas ativas em ai_provider_accounts, busca no catálogo estático aiModel
         const models = await prisma.aiModel.findMany({
           where: {
             modelIdentifier: { in: allCandidates },
@@ -365,43 +452,6 @@ async function resolveModelRecord(
             (a, b) => allCandidates.indexOf(a.modelIdentifier) - allCandidates.indexOf(b.modelIdentifier)
           );
           return models[0];
-        }
-
-        // 2. Se nenhum candidato direto foi encontrado, busca modelos detectados da conta ativa em ai_provider_accounts
-        const activeAccount = await prisma.aiProviderAccount.findFirst({
-          where: { status: "ACTIVE" },
-          orderBy: { priority: "asc" },
-        });
-
-        if (activeAccount) {
-          let detected: string[] = [];
-          try {
-            detected = JSON.parse(activeAccount.modelsDetected || activeAccount.detectedModels || "[]");
-          } catch {}
-
-          if (detected.length > 0) {
-            // Tenta casar candidatos com os modelos detectados
-            for (const cand of allCandidates) {
-              const matched = detected.find((d) => d.toLowerCase() === cand.toLowerCase());
-              if (matched) {
-                return {
-                  id: activeAccount.id,
-                  name: matched,
-                  modelIdentifier: matched,
-                  provider: { slug: activeAccount.provider },
-                };
-              }
-            }
-
-            // Se nenhum casou, escolhe o primeiro modelo detectado da API ativa (evita chamar modelo inexistente)
-            const fallbackDetected = detected[0];
-            return {
-              id: activeAccount.id,
-              name: fallbackDetected,
-              modelIdentifier: fallbackDetected,
-              provider: { slug: activeAccount.provider },
-            };
-          }
         }
 
         // 3. Fallback para qualquer modelo ativo cadastrado
@@ -576,26 +626,23 @@ export async function classifyAndRoute(input: SmartRouterInput): Promise<SmartRo
   try {
     const quotaCheck = await AiQuotaManagerService.checkProviderAvailability(decision.provedor);
     if (!quotaCheck.available) {
-      let fallbackProvider: "anthropic" | "openai" | "google" = "openai";
-      let fallbackCandidate = "gpt-4o";
+      const activeOtherAccounts = await prisma.aiProviderAccount.findMany({
+        where: {
+          provider: { not: decision.provedor },
+          status: { in: ["ACTIVE", "CONNECTED"] },
+        },
+      });
 
-      if (decision.provedor === "openai") {
-        fallbackProvider = "anthropic";
-        fallbackCandidate = "claude-sonnet-5";
-      } else if (decision.provedor === "anthropic") {
-        fallbackProvider = "openai";
-        fallbackCandidate = "gpt-4o";
-      } else if (decision.provedor === "google") {
-        fallbackProvider = "openai";
-        fallbackCandidate = "gpt-4o";
+      if (activeOtherAccounts.length > 0) {
+        const altAcc = activeOtherAccounts[0];
+        const fallbackCandidate = altAcc.provider === "openai" ? "gpt-4o" : "claude-sonnet-5";
+        const resolved = await resolveModelRecord(fallbackCandidate, altAcc.provider as any);
+        decision.motivoEscolha = `[Fallback AI Quota Manager] ${quotaCheck.reason} O Smart Router redirecionou automaticamente para ${resolved.name}.`;
+        decision.provedor = altAcc.provider as any;
+        decision.modeloIdentificador = resolved.identifier;
+        decision.modeloNome = resolved.name;
+        decision.modeloId = resolved.id;
       }
-
-      const resolved = await resolveModelRecord(fallbackCandidate, fallbackProvider);
-      decision.motivoEscolha = `[Fallback AI Quota Manager] ${quotaCheck.reason} O Smart Router redirecionou automaticamente para ${resolved.name}.`;
-      decision.provedor = fallbackProvider;
-      decision.modeloIdentificador = resolved.identifier;
-      decision.modeloNome = resolved.name;
-      decision.modeloId = resolved.id;
     }
   } catch {
     // Continua com a decisão original caso o serviço de quota não responda
