@@ -9,9 +9,7 @@ import { encryptApiKey } from "@/lib/crypto";
 import { AIProviderService } from "@/ai/services/provider.service";
 import { appCache } from "@/lib/cache";
 import {
-  ensureActiveAccountInDatabase,
   serializeAccountToCookieValue,
-  saveLocalDiskSnapshot,
   removeLocalDiskSnapshot,
   SYNC_COOKIE_NAME,
 } from "@/lib/serverless-sync";
@@ -19,8 +17,6 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  // Rehidrata banco caso container serverless (Vercel) tenha acabado de iniciar
-  await ensureActiveAccountInDatabase(req);
   const session = await getCurrentUser();
   if (!session || session.role !== "ADMIN") {
     return NextResponse.json({ error: "Acesso não autorizado." }, { status: 403 });
@@ -54,7 +50,7 @@ export async function GET(req: Request) {
 
     const totalLimit = acc.quotaLimit || acc.totalQuota || 0;
     const used = acc.tokensUsed || acc.usedQuota || 0;
-    const tokensRemaining = totalLimit > 0 ? Math.max(0, totalLimit - used) : acc.tokensRemaining || 10000000;
+    const tokensRemaining = totalLimit > 0 ? Math.max(0, totalLimit - used) : acc.tokensRemaining || 0;
     const percentUsed = totalLimit > 0 ? Math.min(100, Math.round((used / totalLimit) * 100)) : 0;
 
     let dynamicStatus = acc.status;
@@ -72,7 +68,7 @@ export async function GET(req: Request) {
 
     return {
       id: acc.id,
-      name: acc.name || acc.accountName || "API AI Gateway",
+      name: acc.name || acc.accountName || "API Provedor",
       providerId: matchedProvider?.id || acc.provider,
       providerName: matchedProvider?.name || (acc.provider === "openai" ? "OpenAI Compatible" : acc.provider.toUpperCase()),
       providerSlug: acc.provider,
@@ -132,7 +128,7 @@ export async function POST(req: Request) {
     }
 
     if (!name || !name.trim()) {
-      name = targetUrl.includes("clipoos") ? "Clipoos Produção" : "Nova API AI Gateway";
+      name = targetUrl.includes("clipoos") ? "Clipoos Produção" : "Nova API";
     }
 
     const cleanRawKey = (rawApiKey || apiKey || "").trim();
@@ -189,7 +185,7 @@ export async function POST(req: Request) {
 
     // 2. Criptografia AES-256-GCM
     const encrypted = encryptApiKey(cleanRawKey);
-    const finalQuota = Number(quotaLimit || tokenLimitMonthly) || 10000000;
+    const finalQuota = Number(quotaLimit || tokenLimitMonthly) || 0;
 
     // 3. FASE 2: Gravação na Tabela Mestra Oficial ai_provider_accounts
     const savedAccount = await prisma.aiProviderAccount.create({
@@ -317,7 +313,6 @@ export async function POST(req: Request) {
       orderBy: { priority: "asc" },
     });
     const cookieVal = serializeAccountToCookieValue(allActiveAccounts);
-    saveLocalDiskSnapshot(allActiveAccounts);
 
     const response = NextResponse.json({
       success: true,
@@ -467,7 +462,9 @@ export async function DELETE(req: Request) {
     },
   });
 
-  // Atualiza cookie de sincronização serverless
+  // Garante limpeza de snapshots e cookies
+  removeLocalDiskSnapshot();
+
   const remainingAccounts = await prisma.aiProviderAccount.findMany({
     where: { status: { in: ["ACTIVE", "CONNECTED"] } },
     orderBy: { priority: "asc" },
@@ -484,14 +481,12 @@ export async function DELETE(req: Request) {
       sameSite: "lax",
       maxAge: 31536000,
     });
-    saveLocalDiskSnapshot(remainingAccounts);
   } else {
     response.cookies.set(SYNC_COOKIE_NAME, "", {
       path: "/",
       httpOnly: true,
       maxAge: 0,
     });
-    removeLocalDiskSnapshot();
   }
 
   return response;

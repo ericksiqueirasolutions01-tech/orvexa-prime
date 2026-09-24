@@ -5,15 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { syncOfficialAgentsToDatabase } from "@/ai/agents/sync-agents";
-import { ensureActiveAccountInDatabase } from "@/lib/serverless-sync";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    // Sincroniza se o container efêmero acabou de cold-startar
-    await ensureActiveAccountInDatabase(req);
-
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Não autorizado." }, { status: 401 });

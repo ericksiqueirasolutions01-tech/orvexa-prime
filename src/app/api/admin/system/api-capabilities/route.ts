@@ -5,7 +5,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureActiveAccountInDatabase } from "@/lib/serverless-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +34,6 @@ export interface AgentDiagnosticItem {
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureActiveAccountInDatabase(req);
     const user = await getCurrentUser();
     if (!user || user.role !== "ADMIN") {
       return NextResponse.json(
@@ -52,17 +50,17 @@ export async function GET(req: NextRequest) {
 
     const isConfigured = !!activeAccount;
     const activeEndpoint = activeAccount
-      ? activeAccount.baseUrl || activeAccount.customBaseUrl || "https://api.openai.com/v1"
+      ? activeAccount.baseUrl || activeAccount.customBaseUrl || ""
       : "Nenhum endpoint configurado";
 
-    const totalQuota = activeAccount?.quotaLimit || activeAccount?.totalQuota || 10000000;
-    const usedQuota = activeAccount?.tokensUsed || activeAccount?.usedQuota || 0;
-    const remainingQuota = activeAccount?.tokensRemaining ?? activeAccount?.remainingQuota ?? Math.max(0, totalQuota - usedQuota);
+    const totalQuota = activeAccount ? (activeAccount.quotaLimit || activeAccount.totalQuota || 0) : 0;
+    const usedQuota = activeAccount ? (activeAccount.tokensUsed || activeAccount.usedQuota || 0) : 0;
+    const remainingQuota = activeAccount ? (activeAccount.tokensRemaining ?? activeAccount.remainingQuota ?? Math.max(0, totalQuota - usedQuota)) : 0;
 
     const apiInfo = {
       isConfigured,
-      name: activeAccount?.name || activeAccount?.accountName || "Nenhuma API Cadastrada",
-      provider: activeAccount?.provider === "openai" ? "OpenAI Compatible" : (activeAccount?.provider || "Nenhum"),
+      name: activeAccount ? (activeAccount.name || activeAccount.accountName || "API Provedor") : "Nenhuma API Cadastrada",
+      provider: activeAccount ? (activeAccount.provider === "openai" ? "OpenAI Compatible" : activeAccount.provider.toUpperCase()) : "Nenhum",
       providerSlug: activeAccount?.provider || "none",
       endpoint: activeEndpoint,
       status: isConfigured ? ("ONLINE" as const) : ("OFFLINE" as const),
@@ -70,7 +68,7 @@ export async function GET(req: NextRequest) {
       totalQuota,
       usedQuota,
       remainingQuota,
-      lastSync: activeAccount?.lastSync?.toISOString() || activeAccount?.updatedAt?.toISOString() || new Date().toISOString(),
+      lastSync: activeAccount?.lastSync?.toISOString() || activeAccount?.updatedAt?.toISOString() || null,
     };
 
     // Parse de modelos detectados da conta ativa

@@ -9,13 +9,9 @@ import { extractAndSaveFactsFromConversation } from "@/ai/memory/user-memory";
 import { indexConversation } from "@/ai/memory/conversation-indexer";
 import { checkUserTokenQuota, checkModelAccess } from "@/lib/plan-limits";
 import { assertCanSendMessage, assertCanUseAgent, getUserConsumption, invalidateUserConsumptionCache } from "@/lib/consumption";
-import { ensureActiveAccountInDatabase } from "@/lib/serverless-sync";
 
 export async function POST(req: Request) {
   try {
-    // Sincroniza conta ativa caso container serverless (Vercel) tenha acabado de iniciar
-    await ensureActiveAccountInDatabase(req);
-
     const session = await getCurrentUser();
 
     if (!session) {

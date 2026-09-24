@@ -253,7 +253,7 @@ export default function AdminApiKeysPage() {
 
       let keyName = name.trim();
       if (!keyName || keyName.includes("@")) {
-        keyName = autoDetected?.suggestedName || "Chave API AI Gateway";
+        keyName = autoDetected?.suggestedName || "Nova Chave";
       }
 
       const res = await fetch("/api/admin/api-keys", {
@@ -808,7 +808,7 @@ export default function AdminApiKeysPage() {
           <div className="text-center py-10 text-xs text-slate-500">Carregando chaves seguras...</div>
         ) : keys.length === 0 ? (
           <div className="text-center py-10 text-xs text-slate-500">
-            Nenhuma chave cadastrada ainda. Utilize o formulário acima para adicionar suas chaves do Claude, OpenAI ou Gemini!
+            Nenhuma API cadastrada. Utilize o formulário acima para adicionar suas chaves do Claude, OpenAI ou Gemini!
           </div>
         ) : (
           <div className="overflow-x-auto">
